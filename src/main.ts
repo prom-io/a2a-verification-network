@@ -1,10 +1,15 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
+
+  app.enableShutdownHooks();
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -13,6 +18,9 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.useGlobalInterceptors(new LoggingInterceptor());
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('PROM Verification Network')
@@ -24,5 +32,7 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   await app.listen(3002);
+  logger.log('Verification Network listening on port 3002');
 }
+
 bootstrap();
