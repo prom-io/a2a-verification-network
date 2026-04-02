@@ -11,5 +11,8 @@ export const databaseConfigFactory = (
   password: configService.get<string>('DATABASE_PASSWORD', 'postgres'),
   database: configService.get<string>('DATABASE_NAME', 'verification_db'),
   autoLoadEntities: true,
-  synchronize: true,
+  synchronize: configService.get<string>('NODE_ENV', 'development') === 'development',
+  migrationsRun: configService.get<string>('NODE_ENV') === 'production',
+  migrations: ['dist/migrations/*.js'],
+  migrationsTableName: 'typeorm_migrations',
 });
