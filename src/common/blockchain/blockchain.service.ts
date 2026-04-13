@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
+import { withRetry, RetryOptions } from './retry.util';
 
 @Injectable()
 export class BlockchainService implements OnModuleInit {
@@ -32,5 +33,9 @@ export class BlockchainService implements OnModuleInit {
 
   hashData(data: string): string {
     return ethers.keccak256(ethers.toUtf8Bytes(data));
+  }
+
+  async sendWithRetry<T>(operation: () => Promise<T>, options?: RetryOptions): Promise<T> {
+    return withRetry(operation, options, this.logger);
   }
 }
