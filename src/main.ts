@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { DatabaseErrorFilter } from './common/filters/database-error.filter';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -20,7 +21,7 @@ async function bootstrap() {
   );
 
   app.useGlobalInterceptors(new LoggingInterceptor());
-  app.useGlobalFilters(new AllExceptionsFilter());
+  app.useGlobalFilters(new AllExceptionsFilter(), new DatabaseErrorFilter());
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('PROM Verification Network')
