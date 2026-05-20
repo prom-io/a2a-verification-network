@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
+import { AuthModule } from './common/auth/auth.module';
 import { databaseConfigFactory } from './config/database.config';
 import { throttlerConfigFactory } from './config/throttler.config';
 import blockchainConfig from './config/blockchain.config';
@@ -31,6 +32,7 @@ import { PoliciesModule } from './modules/policies/policies.module';
       inject: [ConfigService],
       useFactory: throttlerConfigFactory,
     }),
+    AuthModule,
     BlockchainModule,
     HealthModule,
     ValidatorsModule,
