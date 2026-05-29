@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
+import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { AuthModule } from './common/auth/auth.module';
 import { databaseConfigFactory } from './config/database.config';
 import { throttlerConfigFactory } from './config/throttler.config';
@@ -53,6 +54,6 @@ import { PoliciesModule } from './modules/policies/policies.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(SecurityHeadersMiddleware).forRoutes('*');
+    consumer.apply(SecurityHeadersMiddleware, CsrfMiddleware).forRoutes('*');
   }
 }
