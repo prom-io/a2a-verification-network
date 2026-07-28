@@ -1,0 +1,33 @@
+{
+  "network": "prom-testnet",
+  "chainId": 71234,
+  "explorerUrl": "https://explorer.testnet.prom.io",
+  "confirmations": 6,
+  "solcVersion": "0.8.24",
+  "profile": "testnet",
+  "deployedAt": null,
+  "deployedBlock": null,
+  "contracts": {
+    "ValidatorRegistry": {
+      "address": null,
+      "constructorArgs": []
+    },
+    "PolicyRegistry": {
+      "address": null,
+      "constructorArgs": []
+    },
+    "VerdictRegistry": {
+      "address": null,
+      "constructorArgs": []
+    },
+    "SlashingRewards": {
+      "address": null,
+      "constructorArgs": ["ValidatorRegistry"]
+    }
+  },
+  "notes": [
+    "Written from the output of script/DeployTestnet.s.sol; do not hand-edit.",
+    "A null address means the contract has not been deployed to this network yet.",
+    "History of this file is the rollback record - see docs/TESTNET.md."
+  ]
+}
