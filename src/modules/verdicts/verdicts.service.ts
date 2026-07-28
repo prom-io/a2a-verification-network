@@ -6,6 +6,10 @@ import { ethers } from 'ethers';
 import { Verdict, VerdictOutcome } from './entities/verdict.entity';
 import { BlockchainService } from '../../common/blockchain/blockchain.service';
 import { VERDICT_REGISTRY_ABI } from '../../common/blockchain/abis/verdict-registry.abi';
+import {
+  confirmationsForChain,
+  waitForFinality,
+} from '../../common/blockchain/confirmation-policy';
 
 @Injectable()
 export class VerdictsService {
@@ -64,7 +68,21 @@ export class VerdictsService {
           metaHashBytes,
           [walletAddress],
         );
-        const receipt = await tx.wait();
+        // Wait for finality rather than a single confirmation: the payment
+        // rail settles against this verdict, and settling against one that a
+        // reorg later removes cannot be undone.
+        const chainId = this.configService.get<number>('deployments.chainId', 31337);
+        const receipt = await waitForFinality(
+          this.blockchainService.getProvider(),
+          tx.hash,
+          {
+            confirmations: confirmationsForChain(
+              chainId,
+              this.configService.get<number>('deployments.confirmations'),
+            ),
+          },
+          this.logger,
+        );
         txHash = receipt.hash;
         this.logger.log(`Verdict for session ${params.sessionId} published on-chain, tx: ${txHash}`);
       } catch (error: any) {
