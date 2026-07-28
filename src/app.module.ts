@@ -5,6 +5,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
+import { RequestIdMiddleware } from './common/logging/request-id.middleware';
+import { PinoLoggerService } from './common/logging/pino-logger.service';
 import { AuthModule } from './common/auth/auth.module';
 import { databaseConfigFactory } from './config/database.config';
 import { throttlerConfigFactory } from './config/throttler.config';
@@ -47,14 +49,20 @@ import { PoliciesModule } from './modules/policies/policies.module';
     PoliciesModule,
   ],
   providers: [
+    PinoLoggerService,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
   ],
+  exports: [PinoLoggerService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(SecurityHeadersMiddleware, CsrfMiddleware).forRoutes('*');
+    // RequestIdMiddleware first: it opens the async context that every later
+    // log line reads the correlation id from.
+    consumer
+      .apply(RequestIdMiddleware, SecurityHeadersMiddleware, CsrfMiddleware)
+      .forRoutes('*');
   }
 }
