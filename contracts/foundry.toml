@@ -3,3 +3,21 @@ src = "src"
 out = "out"
 libs = ["lib"]
 solc_version = "0.8.24"
+
+# Testnet builds run with the optimizer on so on-chain verdict submission stays
+# cheap; the default profile keeps local iteration fast.
+[profile.testnet]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+
+[rpc_endpoints]
+local = "http://localhost:8545"
+prom_testnet = "${PROM_TESTNET_RPC_URL}"
+
+[etherscan]
+prom_testnet = { key = "${PROM_TESTNET_EXPLORER_API_KEY}", url = "${PROM_TESTNET_EXPLORER_API_URL}", chain = 71234 }
