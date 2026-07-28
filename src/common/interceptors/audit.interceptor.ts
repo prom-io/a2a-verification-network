@@ -41,9 +41,8 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         const response = context.switchToHttp().getResponse();
-        const userField = (request as Record<string, unknown>).user as
-          | Record<string, unknown>
-          | undefined;
+        const userField = (request as unknown as { user?: { userId?: unknown } })
+          .user;
         const entry: AuditEntry = {
           timestamp: new Date().toISOString(),
           method: request.method,
