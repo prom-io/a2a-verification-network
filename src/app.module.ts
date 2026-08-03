@@ -10,6 +10,7 @@ import { databaseConfigFactory } from './config/database.config';
 import { throttlerConfigFactory } from './config/throttler.config';
 import blockchainConfig from './config/blockchain.config';
 import securityConfig from './config/security.config';
+import deploymentsConfig from './config/deployments.config';
 import { BlockchainModule } from './common/blockchain/blockchain.module';
 import { HealthModule } from './modules/health/health.module';
 import { ValidatorsModule } from './modules/validators/validators.module';
@@ -24,7 +25,7 @@ import { PoliciesModule } from './modules/policies/policies.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [blockchainConfig, securityConfig],
+      load: [blockchainConfig, securityConfig, deploymentsConfig],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
