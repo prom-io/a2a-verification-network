@@ -61,12 +61,18 @@ export class VerdictsService {
         const outcomeEnum = params.outcome === VerdictOutcome.ACCEPT ? 0 : params.outcome === VerdictOutcome.PARTIAL ? 1 : 2;
         const metaHashBytes = ethers.keccak256(ethers.toUtf8Bytes(params.metaHash));
         const walletAddress = await this.blockchainService.getWalletAddress();
-        const tx = await contract.postVerdict(
-          sessionIdBytes,
-          outcomeEnum,
-          ethers.parseEther(params.payableAmount || '0'),
-          metaHashBytes,
-          [walletAddress],
+        // Serialised through the nonce manager: two verdicts published at the
+        // same time otherwise read the same pending nonce and one replaces the
+        // other, leaving a verdict logged as published that never landed.
+        const tx = await this.blockchainService.submitTransaction((nonce) =>
+          contract.postVerdict(
+            sessionIdBytes,
+            outcomeEnum,
+            ethers.parseEther(params.payableAmount || '0'),
+            metaHashBytes,
+            [walletAddress],
+            { nonce },
+          ),
         );
         // Wait for finality rather than a single confirmation: the payment
         // rail settles against this verdict, and settling against one that a

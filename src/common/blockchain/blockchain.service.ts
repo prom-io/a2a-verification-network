@@ -2,12 +2,14 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 import { withRetry, RetryOptions } from './retry.util';
+import { NonceManager } from './nonce-manager';
 
 @Injectable()
 export class BlockchainService implements OnModuleInit {
   private readonly logger = new Logger(BlockchainService.name);
   private provider!: ethers.JsonRpcProvider;
   private wallet!: ethers.Wallet;
+  private nonceManager!: NonceManager;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -19,6 +21,7 @@ export class BlockchainService implements OnModuleInit {
     );
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.wallet = new ethers.Wallet(privateKey, this.provider);
+    this.nonceManager = new NonceManager(this.wallet, this.logger);
     this.logger.log(`Blockchain connected: ${rpcUrl}, wallet: ${this.wallet.address}`);
   }
 
@@ -37,5 +40,19 @@ export class BlockchainService implements OnModuleInit {
 
   async sendWithRetry<T>(operation: () => Promise<T>, options?: RetryOptions): Promise<T> {
     return withRetry(operation, options, this.logger);
+  }
+
+  /**
+   * Submits a transaction with an explicitly reserved nonce, serialised against
+   * every other submission from this wallet. Use this for anything that writes
+   * on chain; calling the contract directly races other writers.
+   */
+  async submitTransaction<T>(send: (nonce: number) => Promise<T>): Promise<T> {
+    return this.nonceManager.submit(send);
+  }
+
+  /** Forces the next submission to re-read the nonce from the node. */
+  resetNonce(): void {
+    this.nonceManager.reset();
   }
 }
