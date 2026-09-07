@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: verification-network
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['verification-network:3002']
+        labels:
+          service: verification-network
+          env: testnet
