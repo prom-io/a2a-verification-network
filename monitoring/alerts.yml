@@ -1,0 +1,13 @@
+groups:
+  - name: verification-network
+    rules:
+      - alert: VerdictBacklogHigh
+        expr: sum(jobs{status="pending"}) > 100
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Verdict backlog above 100 for 10m" }
+      - alert: DisputeRateHigh
+        expr: rate(disputes[15m]) > 0.2
+        for: 15m
+        labels: { severity: critical }
+        annotations: { summary: "Dispute rate elevated" }
