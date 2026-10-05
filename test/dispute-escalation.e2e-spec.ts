@@ -1,6 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import * as request from 'supertest';
+import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { DisputeStatus } from '../src/modules/disputes/entities/dispute.entity';
 
@@ -105,7 +105,7 @@ describe('Dispute escalation (e2e)', () => {
     [{ sessionId: '' }, 'empty session id'],
     [{ reason: '' }, 'empty reason'],
     [{ initiator: 'not-a-did' }, 'initiator is not a DID'],
-  ])('rejects an invalid dispute payload (%s)', async (overrides) => {
+  ])('rejects an invalid dispute payload (%s)', async (overrides: Record<string, unknown>, _label: string) => {
     const res = await openDispute(overrides);
     expect(res.status).toBe(400);
   });
