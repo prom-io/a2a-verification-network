@@ -15,7 +15,7 @@ export class ReputationScore {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', unique: true })
   entityId!: string;
 
   @Column({ type: 'enum', enum: EntityType })

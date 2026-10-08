@@ -26,6 +26,7 @@ export class DisputesController {
   @Patch(':id/resolve')
   @ApiOperation({ summary: 'Resolve an open dispute' })
   @ApiResponse({ status: 200, description: 'Dispute resolved' })
+  @ApiResponse({ status: 409, description: 'Dispute already resolved' })
   resolve(@Param('id') id: string, @Body() dto: ResolveDisputeDto) {
     return this.disputesService.resolve(id, dto);
   }

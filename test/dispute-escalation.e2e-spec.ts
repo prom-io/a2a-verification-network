@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { DisputeStatus } from '../src/modules/disputes/entities/dispute.entity';
+import { CsrfSession, csrfSession, mutate } from './helpers/csrf';
 
 /**
  * Dispute lifecycle end to end: open, inspect, resolve.
@@ -13,10 +14,10 @@ import { DisputeStatus } from '../src/modules/disputes/entities/dispute.entity';
  */
 describe('Dispute escalation (e2e)', () => {
   let app: INestApplication;
+  let csrf: CsrfSession;
 
   const openDispute = (overrides: Record<string, unknown> = {}) =>
-    request(app.getHttpServer())
-      .post('/disputes')
+    mutate(app, csrf, 'post', '/disputes')
       .send({
         sessionId: `dispute-session-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         reason: 'verdict does not match the delivered work',
@@ -34,6 +35,7 @@ describe('Dispute escalation (e2e)', () => {
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
     );
     await app.init();
+    csrf = await csrfSession(app);
   });
 
   afterAll(async () => {
@@ -61,8 +63,7 @@ describe('Dispute escalation (e2e)', () => {
   it('resolves an open dispute and records the outcome', async () => {
     const opened = await openDispute().expect(201);
 
-    const resolved = await request(app.getHttpServer())
-      .patch(`/disputes/${opened.body.id}/resolve`)
+    const resolved = await mutate(app, csrf, 'patch', `/disputes/${opened.body.id}/resolve`)
       .send({ resolution: 'verdict upheld after re-verification' })
       .expect(200);
 
@@ -76,13 +77,11 @@ describe('Dispute escalation (e2e)', () => {
     // released on the first resolution cannot be released again.
     const opened = await openDispute().expect(201);
 
-    await request(app.getHttpServer())
-      .patch(`/disputes/${opened.body.id}/resolve`)
+    await mutate(app, csrf, 'patch', `/disputes/${opened.body.id}/resolve`)
       .send({ resolution: 'first' })
       .expect(200);
 
-    const second = await request(app.getHttpServer())
-      .patch(`/disputes/${opened.body.id}/resolve`)
+    const second = await mutate(app, csrf, 'patch', `/disputes/${opened.body.id}/resolve`)
       .send({ resolution: 'second' });
 
     expect([400, 409]).toContain(second.status);
@@ -95,8 +94,7 @@ describe('Dispute escalation (e2e)', () => {
   });
 
   it('returns 404 when resolving an unknown dispute', async () => {
-    await request(app.getHttpServer())
-      .patch('/disputes/00000000-0000-0000-0000-000000000000/resolve')
+    await mutate(app, csrf, 'patch', '/disputes/00000000-0000-0000-0000-000000000000/resolve')
       .send({ resolution: 'nothing to resolve' })
       .expect(404);
   });

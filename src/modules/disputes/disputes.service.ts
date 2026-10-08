@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Dispute, DisputeStatus } from './entities/dispute.entity';
@@ -30,6 +30,11 @@ export class DisputesService {
 
   async resolve(id: string, dto: ResolveDisputeDto): Promise<Dispute> {
     const dispute = await this.findOne(id);
+    // A second resolution would overwrite the recorded outcome after the escrow
+    // has already been released on the first one.
+    if (dispute.status === DisputeStatus.RESOLVED) {
+      throw new ConflictException(`Dispute ${id} is already resolved`);
+    }
     dispute.status = DisputeStatus.RESOLVED;
     dispute.resolution = dto.resolution;
     dispute.resolvedAt = new Date();

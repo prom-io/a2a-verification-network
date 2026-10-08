@@ -4,7 +4,9 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { HealthService } from './health.service';
 
 @ApiTags('health')
-@SkipThrottle()
+// The throttlers are named (see throttler.config.ts) and a bare SkipThrottle()
+// only lifts the unnamed default, which left probes subject to both limits.
+@SkipThrottle({ short: true, long: true })
 @Controller('health')
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}

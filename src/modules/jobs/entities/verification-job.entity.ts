@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum JobStatus {
@@ -18,6 +19,7 @@ export class VerificationJob {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  @Index('IDX_verification_jobs_sessionId')
   @Column({ type: 'varchar' })
   sessionId!: string;
 

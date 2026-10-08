@@ -1,10 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ethers } from 'ethers';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { CsrfSession, csrfSession, mutate } from './helpers/csrf';
 
 describe('Verification Network (e2e)', () => {
   let app: INestApplication;
+  let csrf: CsrfSession;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -16,6 +19,7 @@ describe('Verification Network (e2e)', () => {
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
     );
     await app.init();
+    csrf = await csrfSession(app);
   });
 
   afterAll(async () => {
@@ -36,11 +40,13 @@ describe('Verification Network (e2e)', () => {
 
   describe('/validators (POST)', () => {
     it('should register a validator', () => {
-      return request(app.getHttpServer())
-        .post('/validators')
+      // A fresh address per run: the column is unique and the suite must be
+      // repeatable against a database that is not dropped between runs.
+      const wallet = ethers.Wallet.createRandom();
+      return mutate(app, csrf, 'post', '/validators')
         .send({
-          address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-          publicKey: '0x04c9d0e1f2a3b4',
+          address: wallet.address,
+          publicKey: wallet.signingKey.compressedPublicKey,
           stake: '1000',
           endpoint: 'http://validator-1:9090',
           capabilities: ['verification'],
@@ -48,13 +54,12 @@ describe('Verification Network (e2e)', () => {
         .expect(201)
         .expect((res) => {
           expect(res.body.id).toBeDefined();
-          expect(res.body.address).toBe('0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC');
+          expect(res.body.address).toBe(wallet.address);
         });
     });
 
     it('should reject missing required fields', () => {
-      return request(app.getHttpServer())
-        .post('/validators')
+      return mutate(app, csrf, 'post', '/validators')
         .send({ address: '0xabc' })
         .expect(400);
     });

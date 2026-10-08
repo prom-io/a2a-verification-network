@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum DisputeStatus {
@@ -16,6 +17,7 @@ export class Dispute {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  @Index('IDX_disputes_sessionId')
   @Column({ type: 'varchar' })
   sessionId!: string;
 
