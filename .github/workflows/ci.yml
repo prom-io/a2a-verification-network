@@ -119,3 +119,41 @@ jobs:
       # testnet-fork.e2e-spec.ts skips itself unless FORK_RPC_URL is set.
       - name: E2E
         run: npm run test:e2e -- --ci --runInBand
+
+  contracts:
+    name: contract tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    env:
+      # foundry.toml interpolates these into [rpc_endpoints] and [etherscan].
+      # Nothing here talks to a network; the placeholders only keep the config
+      # resolvable so build and test never depend on testnet secrets.
+      PROM_TESTNET_RPC_URL: http://127.0.0.1:8545
+      PROM_TESTNET_EXPLORER_API_URL: http://127.0.0.1/api
+      PROM_TESTNET_EXPLORER_API_KEY: unused
+    steps:
+      # forge-std is a git submodule under contracts/lib.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Test
+        run: forge test -vvv
+
+      # The testnet profile is what actually ships (optimizer on, no metadata
+      # hash). Building it here catches optimizer-only failures that the
+      # default profile never sees.
+      - name: Build testnet profile
+        run: forge build
+        env:
+          FOUNDRY_PROFILE: testnet
