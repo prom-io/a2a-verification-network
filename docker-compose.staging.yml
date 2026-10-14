@@ -1,0 +1,80 @@
+# Staging stack for the Verification Network.
+#
+# Every image is pinned. The service image has no default tag on purpose: the
+# deploy workflow passes the immutable `sha-<commit>` tag it has just pushed,
+# and a rollback is the same command with the previous tag.
+#
+#   IMAGE_TAG=sha-<commit> docker compose --env-file .env.staging \
+#     -f docker-compose.staging.yml up -d
+#
+# See .env.staging.example for the variables and docs/TESTNET.md for the
+# contract addresses.
+
+name: verification-network-staging
+
+services:
+  verification-network:
+    image: ghcr.io/${IMAGE_REPOSITORY:?set IMAGE_REPOSITORY to <owner>/<repo>, lowercase}:${IMAGE_TAG:?set IMAGE_TAG to an immutable sha-<commit> tag}
+    restart: unless-stopped
+    ports:
+      - '${SERVICE_PORT:-3002}:3002'
+    environment:
+      # `production` turns synchronize off and runs pending migrations at boot.
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: '5432'
+      DATABASE_USER: ${POSTGRES_USER:-verification}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      DATABASE_NAME: ${POSTGRES_DB:-verification_db}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      CSRF_SECRET: ${CSRF_SECRET:?set CSRF_SECRET}
+      CHAIN_ID: ${CHAIN_ID:-71234}
+      BLOCKCHAIN_RPC_URL: ${BLOCKCHAIN_RPC_URL:?set BLOCKCHAIN_RPC_URL}
+      BLOCKCHAIN_PRIVATE_KEY: ${BLOCKCHAIN_PRIVATE_KEY:?set BLOCKCHAIN_PRIVATE_KEY}
+      BLOCKCHAIN_CONFIRMATIONS: ${BLOCKCHAIN_CONFIRMATIONS:-6}
+      # The service refuses to boot on a non-local chain without all four.
+      VALIDATOR_REGISTRY_ADDRESS: ${VALIDATOR_REGISTRY_ADDRESS:?set VALIDATOR_REGISTRY_ADDRESS}
+      POLICY_REGISTRY_ADDRESS: ${POLICY_REGISTRY_ADDRESS:?set POLICY_REGISTRY_ADDRESS}
+      VERDICT_REGISTRY_ADDRESS: ${VERDICT_REGISTRY_ADDRESS:?set VERDICT_REGISTRY_ADDRESS}
+      SLASHING_REWARDS_ADDRESS: ${SLASHING_REWARDS_ADDRESS:?set SLASHING_REWARDS_ADDRESS}
+      PROM_TESTNET_EXPLORER_URL: ${PROM_TESTNET_EXPLORER_URL:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '5'
+
+  postgres:
+    image: postgres:16.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-verification}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-verification_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '5'
+
+volumes:
+  pgdata:
