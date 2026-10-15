@@ -1,0 +1,129 @@
+name: staging-deploy
+
+# Runs after the image workflow has finished for a push to main, so the tag it
+# deploys is one that passed the scan gate and is already in the registry. A
+# plain `push` trigger would race the image build and pull a tag that does not
+# exist yet.
+on:
+  workflow_run:
+    workflows: [image]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (sha-<commit>); use a previous tag to roll back'
+        required: true
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: deploy to staging
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+      SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+      SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      DEPLOY_PATH: ${{ vars.STAGING_DEPLOY_PATH || '/opt/verification-network' }}
+    steps:
+      - name: Resolve image tag
+        id: image
+        env:
+          INPUT_TAG: ${{ github.event.inputs.image_tag }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          else
+            # Matches `type=sha,format=long` in the image workflow.
+            tag="sha-${HEAD_SHA}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "Deploying \`${GITHUB_REPOSITORY,,}:$tag\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Until the staging host is provisioned the secrets are empty. Skipping
+      # with a visible notice keeps main green without pretending to deploy.
+      - name: Check staging configuration
+        id: config
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
+            echo "::notice::Staging secrets are not configured (STAGING_SSH_HOST, STAGING_SSH_USER, STAGING_SSH_KEY); deploy skipped."
+            echo "Deploy skipped: staging secrets are not configured." >> "$GITHUB_STEP_SUMMARY"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The compose file is taken from the commit being deployed, not from the
+      # tip of main, so a rollback also rolls the stack definition back.
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Configure SSH
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/staging_key
+          chmod 600 ~/.ssh/staging_key
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::STAGING_SSH_KNOWN_HOSTS is not set; trusting the host key on first use."
+            ssh-keyscan -H "$SSH_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+
+      - name: Upload compose file
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          ssh -i ~/.ssh/staging_key "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH'"
+          scp -i ~/.ssh/staging_key docker-compose.staging.yml "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/docker-compose.staging.yml"
+
+      # .env.staging lives on the host and holds everything secret. Only the
+      # image coordinates come from the pipeline. `up --wait` returns non-zero
+      # when a container fails its health check, which fails the deploy.
+      - name: Deploy
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/staging_key "$SSH_USER@$SSH_HOST" \
+            "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh -i ~/.ssh/staging_key "$SSH_USER@$SSH_HOST" "
+            set -e
+            cd '$DEPLOY_PATH'
+            export IMAGE_REPOSITORY='$IMAGE_REPOSITORY' IMAGE_TAG='$IMAGE_TAG'
+            docker compose --env-file .env.staging -f docker-compose.staging.yml pull verification-network
+            docker compose --env-file .env.staging -f docker-compose.staging.yml up -d --wait --wait-timeout 120
+            echo \"\$IMAGE_TAG\" >> deployed-tags.log
+            docker logout ghcr.io
+          "
+
+      - name: Smoke check
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          ssh -i ~/.ssh/staging_key "$SSH_USER@$SSH_HOST" "
+            cd '$DEPLOY_PATH'
+            docker compose --env-file .env.staging -f docker-compose.staging.yml ps
+            docker compose --env-file .env.staging -f docker-compose.staging.yml exec -T verification-network \
+              node -e \"require('http').get('http://127.0.0.1:3002/health',r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{console.log(b);process.exit(JSON.parse(b).status==='ok'?0:1)})}).on('error',e=>{console.error(e.message);process.exit(1)})\"
+          "
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/staging_key
