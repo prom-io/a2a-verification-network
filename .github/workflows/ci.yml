@@ -184,7 +184,7 @@ jobs:
       # Keyed on the sources themselves, not on a lockfile: forge rebuilds
       # everything when any .sol changes, so a coarser key would never hit.
       - name: Cache forge artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             contracts/out
