@@ -54,7 +54,7 @@ jobs:
       # after the push would mean a vulnerable image is already pullable by the
       # time anyone finds out.
       - name: Build for scanning
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -100,7 +100,7 @@ jobs:
       # Rebuilds from the layer cache written above, so what is pushed is the
       # image that was just scanned.
       - name: Push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
