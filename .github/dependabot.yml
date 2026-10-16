@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    # Dependabot's default subject ("Bump x from a to b") is not a conventional
+    # commit; the prefix keeps its history consistent with the rest of the repo.
+    commit-message:
+      prefix: "chore"
+      include: scope
+    groups:
+      # Released together and only work together; separate PRs for each would
+      # never pass on their own.
+      nestjs:
+        patterns: ["@nestjs/*"]
+      typescript-eslint:
+        patterns: ["@typescript-eslint/*"]
+      commitlint:
+        patterns: ["@commitlint/*"]
+      opentelemetry:
+        patterns: ["@opentelemetry/*"]
+    ignore:
+      # Major bumps of the framework and the ORM are migrations, not updates.
+      - dependency-name: "@nestjs/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typeorm"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: "/docker"
+    schedule: { interval: weekly }
+    commit-message:
+      prefix: "chore"
