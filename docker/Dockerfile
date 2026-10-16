@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------- deps: production node_modules only ----------
-FROM node:20-alpine AS deps
+FROM node:25-alpine AS deps
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY package.json package-lock.json* .npmrc* ./
 RUN npm ci --omit=dev --ignore-scripts
 
 # ---------- builder: full deps, compiled output ----------
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ COPY src ./src
 RUN npm run build
 
 # ---------- runtime ----------
-FROM node:20-alpine AS runtime
+FROM node:25-alpine AS runtime
 
 # tini reaps zombies and forwards SIGTERM, which node as PID 1 does not do.
 # Without it graceful shutdown never fires and a verdict that is waiting on
