@@ -1,0 +1,29 @@
+name: commitlint
+
+on: [pull_request]
+
+jobs:
+  lint:
+    name: commit messages
+    runs-on: ubuntu-latest
+    # The body line-length rule was written for people. Dependabot puts
+    # changelog links longer than a hundred characters into the body, and the
+    # check would block dependency updates over formatting rather than content.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    steps:
+      # Full history: the range below needs both the base and the head commit.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      # commitlint resolves the shared config it extends relative to the
+      # repository, not to a temporary npx directory, which is why both the CLI
+      # and @commitlint/config-conventional are devDependencies. Pulling only
+      # the CLI through npx fails with "Cannot find module".
+      - name: Lint commit messages
+        run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --config .commitlintrc.json --verbose
