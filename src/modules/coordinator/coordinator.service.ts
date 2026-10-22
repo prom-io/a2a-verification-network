@@ -4,6 +4,10 @@ import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { JobStatus } from '../jobs/entities/verification-job.entity';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
+import { selectWeighted } from '../validators/staking-tiers';
+
+/** Validators drawn for a job when nothing asks for a different size. */
+export const DEFAULT_COMMITTEE_SIZE = 3;
 
 @Injectable()
 export class CoordinatorService {
@@ -54,12 +58,17 @@ export class CoordinatorService {
     };
   }
 
-  async assignValidators(jobId: string): Promise<string[]> {
-    const activeValidators = (await this.validatorsService.findAll()).filter(v => v.isActive);
-    const selected = activeValidators.slice(0, 3).map(v => v.id);
+  /**
+   * Draws the committee for a job from the staked, active validators. The
+   * draw is weighted by staking tier and seeded with the job id, so it is
+   * reproducible and a validator cannot influence it by registering earlier.
+   */
+  async assignValidators(jobId: string, size = DEFAULT_COMMITTEE_SIZE): Promise<string[]> {
+    const eligible = await this.validatorsService.findEligible();
+    const selected = selectWeighted(eligible, size, jobId);
 
     if (selected.length === 0) {
-      this.logger.warn(`No active validators available for job ${jobId}, using self as validator`);
+      this.logger.warn(`No staked active validators available for job ${jobId}, using self as validator`);
       selected.push('self-validator');
     }
 
