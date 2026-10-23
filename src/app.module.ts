@@ -22,6 +22,7 @@ import { VerdictsModule } from './modules/verdicts/verdicts.module';
 import { DisputesModule } from './modules/disputes/disputes.module';
 import { ReputationModule } from './modules/reputation/reputation.module';
 import { PoliciesModule } from './modules/policies/policies.module';
+import { CommitRevealModule } from './modules/commit-reveal/commit-reveal.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { PoliciesModule } from './modules/policies/policies.module';
     DisputesModule,
     ReputationModule,
     PoliciesModule,
+    CommitRevealModule,
   ],
   providers: [
     PinoLoggerService,

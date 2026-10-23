@@ -1,5 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsUUID, Matches, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsUUID,
+  Matches,
+  MaxLength,
+} from 'class-validator';
+import { VerdictMode } from '../entities/verification-job.entity';
 
 export class SubmitJobDto {
   @ApiProperty({ description: 'Escrow session UUID' })
@@ -30,4 +39,14 @@ export class SubmitJobDto {
   @IsString()
   @MaxLength(512, { message: 'artifactsRef cannot exceed 512 characters' })
   artifactsRef?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: VerdictMode,
+    default: VerdictMode.INSTANT,
+    description: 'commit_reveal makes the committee vote in two phases instead of an instant verdict',
+  })
+  @IsOptional()
+  @IsEnum(VerdictMode, { message: 'verdictMode must be instant or commit_reveal' })
+  verdictMode?: VerdictMode;
 }
