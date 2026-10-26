@@ -28,9 +28,9 @@ Runs are cancelled when a newer commit lands on the same ref.
 Details worth knowing:
 
 - **Coverage is a ratchet.** The `coverageThreshold` block in `package.json`
-  sits just under the measured numbers (statements 15, branches 14, functions
-  13, lines 16 when the gate was added). Raise it when coverage goes up; do not
-  lower it to get a red build through.
+  sits under the measured numbers (statements 30, branches 22, functions 28,
+  lines 30 at the last ratchet). Raise it when coverage goes up; do not lower it
+  to get a red build through.
 - **E2E runs against migrations, not `synchronize`.** The job sets
   `NODE_ENV=test`, so the schema is exactly what `src/migrations/` builds. An
   entity change without a migration fails here. `test/setup-env.ts` raises the

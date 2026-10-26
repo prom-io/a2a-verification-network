@@ -2,16 +2,20 @@ import { CoordinatorService, DEFAULT_COMMITTEE_SIZE } from './coordinator.servic
 import { JobsService } from '../jobs/jobs.service';
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
-import { JobStatus } from '../jobs/entities/verification-job.entity';
+import { JobStatus, VerdictMode } from '../jobs/entities/verification-job.entity';
 import { StakingTier, selectWeighted } from '../validators/staking-tiers';
 
-function build(eligible: Array<{ id: string; tier: StakingTier; weight: number }>) {
+function build(
+  eligible: Array<{ id: string; tier: StakingTier; weight: number }>,
+  verdictMode = VerdictMode.INSTANT,
+) {
   const job = {
     id: 'job-1',
     sessionId: 'session-1',
     requestHash: '0xrequest',
     resultHash: '',
     status: JobStatus.PENDING,
+    verdictMode,
   };
   const jobs = {
     findOne: jest.fn().mockResolvedValue(job),
@@ -95,6 +99,32 @@ describe('CoordinatorService committee assignment', () => {
     );
     expect(jobs.updateStatus).toHaveBeenLastCalledWith('job-1', JobStatus.COMPLETED);
     expect(result).toMatchObject({ jobId: 'job-1', verdictId: 'verdict-1', outcome: 'accept' });
+  });
+
+  it('leaves a commit-reveal job to its committee instead of issuing a verdict', async () => {
+    const { service, jobs, verdicts } = build(pool, VerdictMode.COMMIT_REVEAL);
+
+    const result = await service.processJob('job-1');
+
+    expect(result).toEqual({
+      jobId: 'job-1',
+      sessionId: 'session-1',
+      outcome: 'pending',
+      verdictId: null,
+    });
+    expect(verdicts.createAndPublish).not.toHaveBeenCalled();
+    expect(jobs.updateStatus).toHaveBeenCalledTimes(1);
+    expect(jobs.updateStatus).toHaveBeenCalledWith('job-1', JobStatus.IN_PROGRESS);
+  });
+
+  it('fails a commit-reveal job when there is nobody to vote', async () => {
+    const { service, jobs, verdicts } = build([], VerdictMode.COMMIT_REVEAL);
+
+    const result = await service.processJob('job-1');
+
+    expect(result).toMatchObject({ outcome: 'failed', verdictId: null });
+    expect(verdicts.createAndPublish).not.toHaveBeenCalled();
+    expect(jobs.updateStatus).toHaveBeenCalledWith('job-1', JobStatus.FAILED);
   });
 
   it('reports quorum once the job is completed', async () => {
