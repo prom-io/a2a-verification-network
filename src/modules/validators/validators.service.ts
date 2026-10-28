@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Validator } from './entities/validator.entity';
 import { RegisterValidatorDto } from './dto/register-validator.dto';
 import {
@@ -13,6 +13,7 @@ import {
 } from './staking-tiers';
 
 const DEFAULT_MIN_STAKE_WEI = '1000000000000000000';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface EligibleValidator {
   id: string;
@@ -56,6 +57,17 @@ export class ValidatorsService {
     const validator = await this.validatorRepo.findOneBy({ id });
     if (!validator) throw new NotFoundException(`Validator ${id} not found`);
     return validator;
+  }
+
+  /**
+   * Registered validators among the given ids. Committee lists can contain
+   * placeholders that are not validator ids at all; those are skipped instead
+   * of being sent to a uuid column.
+   */
+  async findByIds(ids: string[]): Promise<Validator[]> {
+    const valid = [...new Set(ids.filter((id) => UUID.test(id)))];
+    if (valid.length === 0) return [];
+    return this.validatorRepo.findBy({ id: In(valid) });
   }
 
   async exit(id: string): Promise<Validator> {

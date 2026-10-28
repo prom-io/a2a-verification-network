@@ -31,5 +31,7 @@ export default registerAs('security', () => ({
   validators: {
     minStakeWei: process.env.VALIDATOR_MIN_STAKE_WEI ?? '1000000000000000000',
     slashingEnabled: process.env.SLASHING_ENABLED !== 'false',
+    // Share of a validator's stake proposed for slashing, in basis points.
+    slashingFractionBps: parseInt(process.env.SLASHING_FRACTION_BPS ?? '1000', 10),
   },
 }));

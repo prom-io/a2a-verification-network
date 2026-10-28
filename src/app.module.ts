@@ -23,6 +23,7 @@ import { DisputesModule } from './modules/disputes/disputes.module';
 import { ReputationModule } from './modules/reputation/reputation.module';
 import { PoliciesModule } from './modules/policies/policies.module';
 import { CommitRevealModule } from './modules/commit-reveal/commit-reveal.module';
+import { SlashingModule } from './modules/slashing/slashing.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { CommitRevealModule } from './modules/commit-reveal/commit-reveal.module
     ReputationModule,
     PoliciesModule,
     CommitRevealModule,
+    SlashingModule,
   ],
   providers: [
     PinoLoggerService,

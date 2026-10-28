@@ -31,6 +31,11 @@ export class VerdictsService {
     return verdict;
   }
 
+  /** Same lookup for callers that treat a missing verdict as a normal case. */
+  async findOptionalBySessionId(sessionId: string): Promise<Verdict | null> {
+    return this.verdictRepo.findOneBy({ sessionId });
+  }
+
   async findAll(): Promise<Verdict[]> {
     return this.verdictRepo.find();
   }

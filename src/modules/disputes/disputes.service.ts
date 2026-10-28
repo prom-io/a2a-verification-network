@@ -1,15 +1,17 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Dispute, DisputeStatus } from './entities/dispute.entity';
+import { Dispute, DisputeOutcome, DisputeStatus } from './entities/dispute.entity';
 import { OpenDisputeDto } from './dto/open-dispute.dto';
 import { ResolveDisputeDto } from './dto/resolve-dispute.dto';
+import { SlashingService } from '../slashing/slashing.service';
 
 @Injectable()
 export class DisputesService {
   constructor(
     @InjectRepository(Dispute)
     private readonly disputeRepo: Repository<Dispute>,
+    private readonly slashingService: SlashingService,
   ) {}
 
   async open(dto: OpenDisputeDto): Promise<Dispute> {
@@ -37,7 +39,17 @@ export class DisputesService {
     }
     dispute.status = DisputeStatus.RESOLVED;
     dispute.resolution = dto.resolution;
+    dispute.outcome = dto.outcome ?? null;
     dispute.resolvedAt = new Date();
-    return this.disputeRepo.save(dispute);
+    const saved = await this.disputeRepo.save(dispute);
+
+    if (saved.outcome === DisputeOutcome.OVERTURNED) {
+      await this.slashingService.proposeForOverturnedVerdict({
+        disputeId: saved.id,
+        sessionId: saved.sessionId,
+        reason: `Verdict overturned in dispute ${saved.id}: ${dto.resolution}`,
+      });
+    }
+    return saved;
   }
 }
