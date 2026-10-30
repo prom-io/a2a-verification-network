@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JobsService } from '../jobs/jobs.service';
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
+import { ReputationService } from '../reputation/reputation.service';
 import { JobStatus, VerdictMode } from '../jobs/entities/verification-job.entity';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
 import { selectWeighted } from '../validators/staking-tiers';
@@ -20,6 +21,7 @@ export class CoordinatorService {
     private readonly jobsService: JobsService,
     private readonly validatorsService: ValidatorsService,
     private readonly verdictsService: VerdictsService,
+    private readonly reputationService: ReputationService,
   ) {}
 
   async processJob(jobId: string): Promise<{
@@ -67,6 +69,10 @@ export class CoordinatorService {
     });
 
     await this.jobsService.updateStatus(jobId, JobStatus.COMPLETED);
+    await this.reputationService.recordForValidators(
+      validators.filter((id) => id !== SELF_VALIDATOR),
+      { accurate: true },
+    );
 
     this.logger.log(`Job ${jobId} completed with outcome: ${outcome}`);
 

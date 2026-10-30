@@ -17,6 +17,7 @@ import {
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
+import { ReputationService } from '../reputation/reputation.service';
 import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitVerdictDto } from './dto/commit-verdict.dto';
 import { RevealVerdictDto } from './dto/reveal-verdict.dto';
@@ -61,6 +62,7 @@ export class CommitRevealService {
     private readonly jobsService: JobsService,
     private readonly validatorsService: ValidatorsService,
     private readonly verdictsService: VerdictsService,
+    private readonly reputationService: ReputationService,
   ) {}
 
   async commit(jobId: string, dto: CommitVerdictDto, now = new Date()): Promise<CommitmentView> {
@@ -231,6 +233,14 @@ export class CommitRevealService {
       validatorIds: tally.supporters,
     });
     await this.jobsService.updateStatus(job.id, JobStatus.COMPLETED);
+
+    // Validators that revealed the losing outcome were wrong about this job;
+    // those that never revealed are left to the availability checks.
+    const dissenters = commitments
+      .filter((c) => c.revealedAt && c.outcome !== tally.outcome)
+      .map((c) => c.validatorId);
+    await this.reputationService.recordForValidators(tally.supporters, { accurate: true });
+    await this.reputationService.recordForValidators(dissenters, { accurate: false });
     this.logger.log(
       `Job ${job.id} finalized as ${tally.outcome} by ${tally.supporters.length} of ` +
         `${job.assignedValidators.length} validators`,

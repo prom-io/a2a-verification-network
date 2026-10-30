@@ -10,6 +10,7 @@ import {
 import { ValidatorsService } from '../../validators/validators.service';
 import { VerdictsService } from '../../verdicts/verdicts.service';
 import { VerdictOutcome } from '../../verdicts/entities/verdict.entity';
+import { ReputationService } from '../../reputation/reputation.service';
 import { CommitRevealService } from '../commit-reveal.service';
 import { computeCommitHash } from '../commitment';
 import { VerdictCommitment } from '../entities/verdict-commitment.entity';
@@ -94,11 +95,14 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
     })),
   };
 
+  const reputation = { recordForValidators: jest.fn(async () => undefined) };
+
   const service = new CommitRevealService(
     commitmentRepo as unknown as Repository<VerdictCommitment>,
     jobs as unknown as JobsService,
     validatorsService as unknown as ValidatorsService,
     verdicts as unknown as VerdictsService,
+    reputation as unknown as ReputationService,
   );
 
   /** Builds the commit payload a validator node would send. */
@@ -122,5 +126,16 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
       now,
     );
 
-  return { service, job, validators, rows, jobs, verdicts, commitPayload, commit, reveal };
+  return {
+    service,
+    job,
+    validators,
+    rows,
+    jobs,
+    verdicts,
+    reputation,
+    commitPayload,
+    commit,
+    reveal,
+  };
 }

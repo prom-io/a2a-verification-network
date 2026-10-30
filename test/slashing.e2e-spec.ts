@@ -103,6 +103,23 @@ describe('Slashing proposals (e2e)', () => {
     }
   });
 
+  it('records the lost dispute in the reputation of the signers', async () => {
+    const { signers } = await disputedVerdict('overturned');
+
+    for (const validatorId of signers) {
+      const res = await request(app.getHttpServer()).get(`/reputation/${validatorId}`).expect(200);
+
+      expect(res.body.entityType).toBe('validator');
+      expect(Number(res.body.disputeLossRate)).toBeGreaterThan(0);
+      expect(Number(res.body.accuracy)).toBeLessThan(1);
+      expect(res.body.totalJobs).toBeGreaterThanOrEqual(1);
+      // Seen a moment ago: nothing has decayed yet.
+      expect(res.body.decayFactor).toBeCloseTo(1, 3);
+      expect(res.body.effectiveScore).toBeCloseTo(res.body.rawScore, 3);
+      expect(res.body.halfLifeDays).toBe(30);
+    }
+  });
+
   it('raises nothing when the verdict is upheld or the outcome is not stated', async () => {
     const upheld = await disputedVerdict('upheld');
     const unstated = await disputedVerdict();

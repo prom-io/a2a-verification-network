@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
+import { ReputationService } from '../reputation/reputation.service';
 import { SlashingProposal, SlashingProposalStatus } from './entities/slashing-proposal.entity';
 import { SlashingService, slashAmount } from './slashing.service';
 
@@ -67,13 +68,16 @@ function build(options: {
     get: jest.fn((key: string, fallback?: unknown) => options.config?.[key] ?? fallback),
   };
 
+  const reputation = { recordForValidators: jest.fn(async () => undefined) };
+
   const service = new SlashingService(
     repo as unknown as Repository<SlashingProposal>,
     validators as unknown as ValidatorsService,
     verdicts as unknown as VerdictsService,
     config as unknown as ConfigService,
+    reputation as unknown as ReputationService,
   );
-  return { service, rows, stakes, validators, repo };
+  return { service, rows, stakes, validators, repo, reputation };
 }
 
 const context = { disputeId: 'dispute-1', sessionId: 'session-1', reason: 'verdict overturned' };
@@ -145,11 +149,29 @@ describe('SlashingService proposals', () => {
     expect(await service.proposeForOverturnedVerdict(context)).toEqual([]);
   });
 
-  it('raises nothing when slashing is disabled', async () => {
-    const { service, rows } = build({ config: { 'security.validators.slashingEnabled': false } });
+  it('raises nothing when slashing is disabled, but still records the lost dispute', async () => {
+    const { service, rows, reputation } = build({
+      config: { 'security.validators.slashingEnabled': false },
+    });
 
     expect(await service.proposeForOverturnedVerdict(context)).toEqual([]);
     expect(rows).toHaveLength(0);
+    expect(reputation.recordForValidators).toHaveBeenCalledWith([V1, V2], {
+      accurate: false,
+      disputeLost: true,
+    });
+  });
+
+  it('records the lost dispute against every registered signer', async () => {
+    const { service, reputation } = build({ signatures: ['self-validator', V2] });
+
+    await service.proposeForOverturnedVerdict(context);
+
+    expect(reputation.recordForValidators).toHaveBeenCalledTimes(1);
+    expect(reputation.recordForValidators).toHaveBeenCalledWith([V2], {
+      accurate: false,
+      disputeLost: true,
+    });
   });
 
   it('does not duplicate proposals for the same dispute', async () => {

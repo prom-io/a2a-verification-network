@@ -13,6 +13,7 @@ import { throttlerConfigFactory } from './config/throttler.config';
 import blockchainConfig from './config/blockchain.config';
 import securityConfig from './config/security.config';
 import deploymentsConfig from './config/deployments.config';
+import reputationConfig from './config/reputation.config';
 import { BlockchainModule } from './common/blockchain/blockchain.module';
 import { HealthModule } from './modules/health/health.module';
 import { ValidatorsModule } from './modules/validators/validators.module';
@@ -29,7 +30,7 @@ import { SlashingModule } from './modules/slashing/slashing.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [blockchainConfig, securityConfig, deploymentsConfig],
+      load: [blockchainConfig, securityConfig, deploymentsConfig, reputationConfig],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

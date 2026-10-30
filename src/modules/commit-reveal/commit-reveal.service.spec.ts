@@ -34,6 +34,30 @@ describe('CommitRevealService', () => {
     expect(round.tally.outcome).toBe(VerdictOutcome.ACCEPT);
   });
 
+  it('credits the majority and marks down the dissenter', async () => {
+    const { validators, commit, reveal, reputation } = buildRound(3);
+    const [a, b, c] = validators;
+    await commit(a, VerdictOutcome.ACCEPT);
+    await commit(b, VerdictOutcome.ACCEPT);
+    await commit(c, VerdictOutcome.REJECT);
+    await reveal(a, VerdictOutcome.ACCEPT);
+    await reveal(b, VerdictOutcome.ACCEPT);
+    await reveal(c, VerdictOutcome.REJECT);
+
+    expect(reputation.recordForValidators).toHaveBeenCalledWith([a.id, b.id], { accurate: true });
+    expect(reputation.recordForValidators).toHaveBeenCalledWith([c.id], { accurate: false });
+  });
+
+  it('records no reputation for a round that reached no verdict', async () => {
+    const { validators, commit, reveal, reputation } = buildRound(2);
+    await commit(validators[0], VerdictOutcome.ACCEPT);
+    await commit(validators[1], VerdictOutcome.REJECT);
+    await reveal(validators[0], VerdictOutcome.ACCEPT);
+    await reveal(validators[1], VerdictOutcome.REJECT);
+
+    expect(reputation.recordForValidators).not.toHaveBeenCalled();
+  });
+
   it('keeps the vote hidden until the reveal', async () => {
     const { validators, commit, service } = buildRound(3);
 

@@ -5,6 +5,7 @@ import { FindOptionsWhere, Repository } from 'typeorm';
 import { ValidatorsService } from '../validators/validators.service';
 import { parseStake } from '../validators/staking-tiers';
 import { VerdictsService } from '../verdicts/verdicts.service';
+import { ReputationService } from '../reputation/reputation.service';
 import { DecideSlashingDto } from './dto/decide-slashing.dto';
 import { SlashingProposal, SlashingProposalStatus } from './entities/slashing-proposal.entity';
 
@@ -32,6 +33,7 @@ export class SlashingService {
     private readonly validatorsService: ValidatorsService,
     private readonly verdictsService: VerdictsService,
     private readonly configService: ConfigService,
+    private readonly reputationService: ReputationService,
   ) {}
 
   /**
@@ -41,11 +43,6 @@ export class SlashingService {
    * a pending proposal can be rejected.
    */
   async proposeForOverturnedVerdict(context: OverturnedVerdictContext): Promise<SlashingProposal[]> {
-    if (!this.configService.get<boolean>('security.validators.slashingEnabled', true)) {
-      this.logger.log(`Slashing disabled; no proposals for dispute ${context.disputeId}`);
-      return [];
-    }
-
     const verdict = await this.verdictsService.findOptionalBySessionId(context.sessionId);
     if (!verdict) {
       this.logger.warn(
@@ -54,12 +51,22 @@ export class SlashingService {
       return [];
     }
 
-    const fractionBps = Number(
-      this.configService.get('security.validators.slashingFractionBps', 1000),
-    );
     // Signatures can hold placeholders (the service acting as its own
     // validator); only registered validators have a stake to slash.
     const signers = await this.validatorsService.findByIds(verdict.signatures);
+
+    // The lost dispute goes on the record whether or not stake is at risk.
+    await this.reputationService.recordForValidators(
+      signers.map((validator) => validator.id),
+      { accurate: false, disputeLost: true },
+    );
+    if (!this.configService.get<boolean>('security.validators.slashingEnabled', true)) {
+      this.logger.log(`Slashing disabled; no proposals for dispute ${context.disputeId}`);
+      return [];
+    }
+    const fractionBps = Number(
+      this.configService.get('security.validators.slashingFractionBps', 1000),
+    );
     const existing = await this.proposalRepo.findBy({ disputeId: context.disputeId });
     const alreadyProposed = new Set(existing.map((proposal) => proposal.validatorId));
 

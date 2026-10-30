@@ -2,6 +2,7 @@ import { CoordinatorService, DEFAULT_COMMITTEE_SIZE } from './coordinator.servic
 import { JobsService } from '../jobs/jobs.service';
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
+import { ReputationService } from '../reputation/reputation.service';
 import { JobStatus, VerdictMode } from '../jobs/entities/verification-job.entity';
 import { StakingTier, selectWeighted } from '../validators/staking-tiers';
 
@@ -26,12 +27,14 @@ function build(
   const verdicts = {
     createAndPublish: jest.fn().mockResolvedValue({ id: 'verdict-1', txHash: undefined }),
   };
+  const reputation = { recordForValidators: jest.fn().mockResolvedValue(undefined) };
   const service = new CoordinatorService(
     jobs as unknown as JobsService,
     validators as unknown as ValidatorsService,
     verdicts as unknown as VerdictsService,
+    reputation as unknown as ReputationService,
   );
-  return { service, jobs, validators, verdicts };
+  return { service, jobs, validators, verdicts, reputation };
 }
 
 const pool = [
@@ -99,6 +102,24 @@ describe('CoordinatorService committee assignment', () => {
     );
     expect(jobs.updateStatus).toHaveBeenLastCalledWith('job-1', JobStatus.COMPLETED);
     expect(result).toMatchObject({ jobId: 'job-1', verdictId: 'verdict-1', outcome: 'accept' });
+  });
+
+  it('credits the committee of a completed job in the reputation ledger', async () => {
+    const { service, reputation } = build(pool);
+
+    await service.processJob('job-1');
+
+    expect(reputation.recordForValidators).toHaveBeenCalledWith(selectWeighted(pool, 3, 'job-1'), {
+      accurate: true,
+    });
+  });
+
+  it('does not record reputation for the placeholder validator', async () => {
+    const { service, reputation } = build([]);
+
+    await service.processJob('job-1');
+
+    expect(reputation.recordForValidators).toHaveBeenCalledWith([], { accurate: true });
   });
 
   it('leaves a commit-reveal job to its committee instead of issuing a verdict', async () => {

@@ -33,6 +33,17 @@ export class ReputationScore {
   @Column({ type: 'int', default: 0 })
   totalJobs!: number;
 
+  /**
+   * How much evidence the averages above rest on: one per observation,
+   * discounted by the reputation half-life as it ages.
+   */
+  @Column({ type: 'numeric', precision: 14, scale: 6, default: 0 })
+  evidenceWeight!: string;
+
+  /** Last observation; the reference point for time decay. */
+  @Column({ type: 'timestamp', nullable: true })
+  lastActivityAt!: Date | null;
+
   @UpdateDateColumn()
   lastUpdated!: Date;
 }
