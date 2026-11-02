@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { createHash, randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -111,5 +112,121 @@ describe('Dispute escalation (e2e)', () => {
   it('rejects unknown fields rather than silently dropping them', async () => {
     const res = await openDispute({ escalateImmediately: true });
     expect(res.status).toBe(400);
+  });
+
+  describe('evidence', () => {
+    const sha256 = (content: Buffer) => `0x${createHash('sha256').update(content).digest('hex')}`;
+    const attach = (disputeId: string, body: Record<string, unknown>) =>
+      mutate(app, csrf, 'post', `/disputes/${disputeId}/evidence`).send({
+        submitter: 'did:prom:agent-a',
+        uri: 'ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+        ...body,
+      });
+
+    it('hashes inline content and stores the evidence as verified', async () => {
+      const opened = await openDispute().expect(201);
+      const content = Buffer.from('delivery log: 3 of 5 files missing');
+
+      const res = await attach(opened.body.id, {
+        content: content.toString('base64'),
+        mimeType: 'text/plain',
+        description: 'delivery log',
+      }).expect(201);
+
+      expect(res.body).toMatchObject({
+        disputeId: opened.body.id,
+        contentHash: sha256(content),
+        sizeBytes: content.length,
+        hashVerified: true,
+        mimeType: 'text/plain',
+      });
+      expect(res.body.content).toBeUndefined();
+    });
+
+    it('stores a declared hash as a claim and verifies it later', async () => {
+      const opened = await openDispute().expect(201);
+      const content = Buffer.from(`screenshot-bytes-${randomUUID()}`);
+
+      const attached = await attach(opened.body.id, {
+        uri: 'https://evidence.example.org/screenshot.png',
+        contentHash: sha256(content).toUpperCase().replace('0X', '0x'),
+        sizeBytes: content.length,
+      }).expect(201);
+      expect(attached.body.hashVerified).toBe(false);
+      expect(attached.body.contentHash).toBe(sha256(content));
+
+      const wrong = await mutate(
+        app,
+        csrf,
+        'post',
+        `/disputes/${opened.body.id}/evidence/${attached.body.id}/verify`,
+      )
+        .send({ content: Buffer.from('something else').toString('base64') })
+        .expect(200);
+      expect(wrong.body.matches).toBe(false);
+
+      const right = await mutate(
+        app,
+        csrf,
+        'post',
+        `/disputes/${opened.body.id}/evidence/${attached.body.id}/verify`,
+      )
+        .send({ content: content.toString('base64') })
+        .expect(200);
+      expect(right.body).toMatchObject({ matches: true, computedHash: sha256(content) });
+
+      const listed = await request(app.getHttpServer())
+        .get(`/disputes/${opened.body.id}/evidence`)
+        .expect(200);
+      expect(listed.body).toHaveLength(1);
+      expect(listed.body[0].hashVerified).toBe(true);
+    });
+
+    it('rejects content that does not match the declared hash', async () => {
+      const opened = await openDispute().expect(201);
+
+      await attach(opened.body.id, {
+        content: Buffer.from('actual').toString('base64'),
+        contentHash: sha256(Buffer.from('claimed')),
+      }).expect(400);
+    });
+
+    it('rejects evidence without a hash, with a bad URI or with broken base64', async () => {
+      const opened = await openDispute().expect(201);
+      const hash = sha256(Buffer.from('x'));
+
+      await attach(opened.body.id, {}).expect(400);
+      await attach(opened.body.id, { contentHash: '0x1234' }).expect(400);
+      await attach(opened.body.id, { contentHash: hash, uri: 'file:///etc/passwd' }).expect(400);
+      await attach(opened.body.id, { contentHash: hash, submitter: 'anonymous' }).expect(400);
+      await attach(opened.body.id, { content: 'not base64!!' }).expect(400);
+    });
+
+    it('rejects the same content twice on one dispute but not across disputes', async () => {
+      const first = await openDispute().expect(201);
+      const second = await openDispute().expect(201);
+      const contentHash = sha256(Buffer.from(`shared-${randomUUID()}`));
+
+      await attach(first.body.id, { contentHash }).expect(201);
+      await attach(first.body.id, { contentHash }).expect(409);
+      await attach(second.body.id, { contentHash }).expect(201);
+    });
+
+    it('accepts no more evidence once the dispute is resolved', async () => {
+      const opened = await openDispute().expect(201);
+      await mutate(app, csrf, 'patch', `/disputes/${opened.body.id}/resolve`)
+        .send({ resolution: 'closed' })
+        .expect(200);
+
+      await attach(opened.body.id, { contentHash: sha256(Buffer.from('late')) }).expect(409);
+    });
+
+    it('returns 404 for evidence on an unknown dispute', async () => {
+      const unknown = randomUUID();
+
+      await attach(unknown, { contentHash: sha256(Buffer.from('x')) }).expect(404);
+      await request(app.getHttpServer()).get(`/disputes/${unknown}/evidence`).expect(404);
+      await request(app.getHttpServer()).get('/disputes/not-a-uuid/evidence').expect(400);
+    });
   });
 });
