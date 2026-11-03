@@ -37,6 +37,10 @@ export class DisputesService {
     if (dispute.status === DisputeStatus.RESOLVED) {
       throw new ConflictException(`Dispute ${id} is already resolved`);
     }
+    if (dispute.status === DisputeStatus.APPEALED) {
+      // Only the appeal panel can change the resolution now.
+      throw new ConflictException(`Dispute ${id} is under appeal`);
+    }
     dispute.status = DisputeStatus.RESOLVED;
     dispute.resolution = dto.resolution;
     dispute.outcome = dto.outcome ?? null;

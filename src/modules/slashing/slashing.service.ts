@@ -147,6 +147,28 @@ export class SlashingService {
     }
   }
 
+  /**
+   * Withdraws every proposal of a dispute that is still pending, e.g. when an
+   * appeal reinstates the verdict. Approved proposals are not undone here:
+   * stake that was already taken has to be restored by an operator.
+   */
+  async rejectPendingForDispute(disputeId: string, decidedBy: string, note: string): Promise<number> {
+    const result = await this.proposalRepo.update(
+      { disputeId, status: SlashingProposalStatus.PROPOSED },
+      {
+        status: SlashingProposalStatus.REJECTED,
+        decidedAt: new Date(),
+        decidedBy,
+        decisionNote: note,
+      },
+    );
+    const withdrawn = result.affected ?? 0;
+    if (withdrawn > 0) {
+      this.logger.log(`Withdrew ${withdrawn} pending slashing proposal(s) of dispute ${disputeId}`);
+    }
+    return withdrawn;
+  }
+
   async reject(id: string, dto: DecideSlashingDto): Promise<SlashingProposal> {
     return this.decide(id, SlashingProposalStatus.REJECTED, dto);
   }

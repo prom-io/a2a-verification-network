@@ -10,6 +10,8 @@ export enum DisputeStatus {
   OPEN = 'open',
   ESCALATED = 'escalated',
   RESOLVED = 'resolved',
+  /** Resolved, then challenged; back to resolved when the appeal is decided. */
+  APPEALED = 'appealed',
 }
 
 /** What a resolution means for the verdict the dispute was opened against. */

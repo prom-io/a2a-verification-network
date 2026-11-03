@@ -258,6 +258,28 @@ describe('SlashingService decisions', () => {
     });
   });
 
+  it('withdraws the pending proposals of a dispute and leaves decided ones alone', async () => {
+    const { service, rows, stakes } = build();
+    const [first, second] = await service.proposeForOverturnedVerdict(context);
+    await service.approve(first.id, operator);
+
+    const withdrawn = await service.rejectPendingForDispute(
+      'dispute-1',
+      'appeal:appeal-1',
+      'Verdict reinstated on appeal',
+    );
+
+    expect(withdrawn).toBe(1);
+    expect(rows.find((row) => row.id === second.id)).toMatchObject({
+      status: SlashingProposalStatus.REJECTED,
+      decidedBy: 'appeal:appeal-1',
+      decisionNote: 'Verdict reinstated on appeal',
+    });
+    expect(rows.find((row) => row.id === first.id)?.status).toBe(SlashingProposalStatus.APPROVED);
+    expect(stakes[V2]).toBe(200n * ETHER);
+    expect(await service.rejectPendingForDispute('dispute-1', 'appeal:appeal-1', 'again')).toBe(0);
+  });
+
   it('reports an unknown proposal as not found', async () => {
     const { service } = build();
 
