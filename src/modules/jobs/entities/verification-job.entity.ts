@@ -43,6 +43,7 @@ export class VerificationJob {
   @Column({ type: 'varchar', nullable: true })
   artifactsRef!: string | null;
 
+  @Index('IDX_verification_jobs_status')
   @Column({ type: 'enum', enum: JobStatus, default: JobStatus.PENDING })
   status!: JobStatus;
 
@@ -57,6 +58,10 @@ export class VerificationJob {
 
   @Column({ type: 'varchar', length: 16, default: VerdictMode.INSTANT })
   verdictMode!: VerdictMode;
+
+  /** Fee offered by the submitter, in wei; orders the pending queue. */
+  @Column({ type: 'numeric', precision: 78, scale: 0, default: 0 })
+  fee!: string;
 
   /** Set at assignment for commit-reveal jobs; commitments close after it. */
   @Column({ type: 'timestamp', nullable: true })

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEnum,
   IsString,
   IsNotEmpty,
@@ -49,4 +50,22 @@ export class SubmitJobDto {
   @IsOptional()
   @IsEnum(VerdictMode, { message: 'verdictMode must be instant or commit_reveal' })
   verdictMode?: VerdictMode;
+
+  @ApiProperty({
+    required: false,
+    description: 'Fee offered for the job in wei; a higher fee is processed earlier',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9]{1,78}$/, { message: 'fee must be a non-negative integer string (wei)' })
+  fee?: string;
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description: 'Queue the job instead of processing it in the request',
+  })
+  @IsOptional()
+  @IsBoolean()
+  deferred?: boolean;
 }

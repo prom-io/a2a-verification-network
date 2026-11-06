@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { VerificationJob } from './entities/verification-job.entity';
 import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
+import { JobQueueService } from './job-queue.service';
 import { CoordinatorModule } from '../coordinator/coordinator.module';
 
 @Module({
@@ -11,7 +12,7 @@ import { CoordinatorModule } from '../coordinator/coordinator.module';
     forwardRef(() => CoordinatorModule),
   ],
   controllers: [JobsController],
-  providers: [JobsService],
-  exports: [JobsService],
+  providers: [JobsService, JobQueueService],
+  exports: [JobsService, JobQueueService],
 })
 export class JobsModule {}

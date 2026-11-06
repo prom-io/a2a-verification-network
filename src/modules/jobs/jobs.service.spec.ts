@@ -21,6 +21,13 @@ function build(env: Record<string, string> = {}) {
       ) ?? null,
     ),
     find: jest.fn(async () => rows),
+    update: jest.fn(async (where: Partial<VerificationJob>, patch: Partial<VerificationJob>) => {
+      const hit = rows.filter((row) =>
+        Object.entries(where).every(([key, value]) => row[key as keyof VerificationJob] === value),
+      );
+      hit.forEach((row) => Object.assign(row, patch));
+      return { affected: hit.length };
+    }),
     findBy: jest.fn(async ({ status }: { status: JobStatus }) =>
       rows.filter((row) => row.status === status),
     ),
@@ -108,6 +115,23 @@ describe('JobsService', () => {
 
     expect((await service.updateStatus(job.id, JobStatus.IN_PROGRESS)).completedAt).toBeUndefined();
     expect((await service.updateStatus(job.id, JobStatus.FAILED)).completedAt).toBeInstanceOf(Date);
+  });
+
+  it('stores the offered fee and defaults to none', async () => {
+    const { service } = build();
+
+    expect((await service.submit(dto)).fee).toBe('0');
+    expect((await service.submit({ ...dto, fee: '2500000000000000' })).fee).toBe('2500000000000000');
+  });
+
+  it('lets only one caller claim a pending job', async () => {
+    const { service } = build();
+    const job = await service.submit(dto);
+
+    expect(await service.claimPending(job.id)).toBe(true);
+    expect(await service.claimPending(job.id)).toBe(false);
+    expect((await service.findOne(job.id)).status).toBe(JobStatus.ASSIGNED);
+    expect(await service.claimPending('missing')).toBe(false);
   });
 
   it('filters the listing by status', async () => {

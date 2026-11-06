@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { VerificationJob, JobStatus, VerdictMode } from './entities/verification-job.entity';
 import { SubmitJobDto } from './dto/submit-job.dto';
+import { PriorityOptions } from './priority';
 
 @Injectable()
 export class JobsService {
@@ -23,6 +24,7 @@ export class JobsService {
       policyId: dto.policyId,
       artifactsRef: dto.artifactsRef ?? null,
       verdictMode: dto.verdictMode ?? VerdictMode.INSTANT,
+      fee: dto.fee ?? '0',
       status: JobStatus.PENDING,
     });
     const saved = await this.jobRepo.save(job);
@@ -64,6 +66,40 @@ export class JobsService {
       job.revealDeadline = new Date(now + commitMs + revealMs);
     }
     return this.jobRepo.save(job);
+  }
+
+  /**
+   * Head of the pending queue. The ordering is done by the database with the
+   * same formula as priority.ts (fee in fee units plus waiting time in aging
+   * intervals), so the limit cuts off the right jobs however long the queue is.
+   */
+  async findPendingByPriority(limit: number, options: PriorityOptions): Promise<VerificationJob[]> {
+    const aging = options.agingSeconds > 0 ? options.agingSeconds : null;
+    return this.jobRepo
+      .createQueryBuilder('job')
+      .addSelect(
+        `(job.fee / CAST(:feeUnit AS numeric)) + ` +
+          `COALESCE(EXTRACT(EPOCH FROM (LOCALTIMESTAMP - job."submittedAt")) / CAST(:aging AS numeric), 0)`,
+        'priority_score',
+      )
+      .where('job.status = :status', { status: JobStatus.PENDING })
+      .setParameters({ feeUnit: options.feeUnitWei.toString(), aging })
+      .orderBy('priority_score', 'DESC')
+      .addOrderBy('job.submittedAt', 'ASC')
+      .limit(limit)
+      .getMany();
+  }
+
+  /**
+   * Takes a pending job off the queue. The conditional update is what keeps
+   * two service instances from processing the same job.
+   */
+  async claimPending(id: string): Promise<boolean> {
+    const result = await this.jobRepo.update(
+      { id, status: JobStatus.PENDING },
+      { status: JobStatus.ASSIGNED },
+    );
+    return (result.affected ?? 0) > 0;
   }
 
   async findBySessionId(sessionId: string): Promise<VerificationJob | null> {
