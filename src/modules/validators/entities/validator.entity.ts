@@ -32,8 +32,23 @@ export class Validator {
   @Column({ type: 'jsonb', default: [] })
   capabilities!: string[];
 
+  /** False once the validator has exited or is suspended. */
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  lastHeartbeatAt!: Date | null;
+
+  /** Set while the validator is suspended; cleared when it reports in again. */
+  @Column({ type: 'timestamp', nullable: true })
+  suspendedAt!: Date | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  suspensionReason!: string | null;
+
+  /** Set when the validator leaves for good; an exit is not undone by a heartbeat. */
+  @Column({ type: 'timestamp', nullable: true })
+  exitedAt!: Date | null;
 
   @CreateDateColumn()
   registeredAt!: Date;

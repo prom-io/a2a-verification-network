@@ -73,6 +73,7 @@ export class ValidatorsService {
   async exit(id: string): Promise<Validator> {
     const validator = await this.findOne(id);
     validator.isActive = false;
+    validator.exitedAt = validator.exitedAt ?? new Date();
     return this.validatorRepo.save(validator);
   }
 

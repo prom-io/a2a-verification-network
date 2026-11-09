@@ -109,7 +109,9 @@ describe('ValidatorsService staking tiers', () => {
     const { repo } = repoStub([{ id: 'v1', stake: ETHER.toString() }]);
     const service = new ValidatorsService(repo, configStub());
 
-    expect((await service.exit('v1')).isActive).toBe(false);
+    const exited = await service.exit('v1');
+    expect(exited.isActive).toBe(false);
+    expect(exited.exitedAt).toBeInstanceOf(Date);
     expect(await service.findEligible()).toEqual([]);
   });
 });
