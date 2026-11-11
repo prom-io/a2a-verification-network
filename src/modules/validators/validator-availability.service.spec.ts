@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 import { Repository } from 'typeorm';
 import { Validator } from './entities/validator.entity';
+import { ValidatorSetCache } from './validator-set.cache';
 import {
   SUSPENSION_MISSED_HEARTBEAT,
   ValidatorAvailabilityService,
@@ -36,9 +37,11 @@ function build(seed: Partial<Validator>[] = [], env: Record<string, unknown> = {
     save: jest.fn(async (validator: Validator) => validator),
   };
   const config = { get: jest.fn((key: string, fallback?: unknown) => env[key] ?? fallback) };
+  const setCache = { invalidate: jest.fn() };
   const service = new ValidatorAvailabilityService(
     repo as unknown as Repository<Validator>,
     config as unknown as ConfigService,
+    setCache as unknown as ValidatorSetCache,
   );
 
   const beat = async (id: string, timestamp = NOW.getTime(), signer: ethers.HDNodeWallet = wallet) => ({
@@ -46,7 +49,7 @@ function build(seed: Partial<Validator>[] = [], env: Record<string, unknown> = {
     signature: await signer.signMessage(heartbeatMessage(id, timestamp)),
   });
 
-  return { service, rows, repo, beat, wallet };
+  return { service, rows, repo, beat, wallet, setCache };
 }
 
 describe('ValidatorAvailabilityService.heartbeat', () => {
@@ -138,6 +141,24 @@ describe('ValidatorAvailabilityService.heartbeat', () => {
       suspensionReason: null,
     });
     expect(rows[0].isActive).toBe(true);
+  });
+
+  it('invalidates the validator set only when eligibility changes', async () => {
+    const routine = build([{}]);
+    await routine.service.heartbeat('v1', await routine.beat('v1'), NOW);
+    expect(routine.setCache.invalidate).not.toHaveBeenCalled();
+
+    const returning = build([
+      { isActive: false, suspendedAt: secondsAgo(600), suspensionReason: SUSPENSION_MISSED_HEARTBEAT },
+    ]);
+    await returning.service.heartbeat('v1', await returning.beat('v1'), NOW);
+    expect(returning.setCache.invalidate).toHaveBeenCalledTimes(1);
+
+    const sweep = build([{ lastHeartbeatAt: secondsAgo(30) }, { lastHeartbeatAt: secondsAgo(900) }]);
+    await sweep.service.suspendStale(NOW);
+    expect(sweep.setCache.invalidate).toHaveBeenCalledTimes(1);
+    await sweep.service.suspendStale(NOW);
+    expect(sweep.setCache.invalidate).toHaveBeenCalledTimes(1);
   });
 
   it('does not bring back a validator that has exited', async () => {

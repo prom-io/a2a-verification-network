@@ -104,6 +104,37 @@ describe('Verification Network (e2e)', () => {
       expect(read.body.tier).toBe('platinum');
     });
 
+    it('serves the eligible set from the epoch snapshot and refreshes it on writes', async () => {
+      const wallet = ethers.Wallet.createRandom();
+      const before = await request(app.getHttpServer()).get('/validators/set').expect(200);
+
+      const registered = await mutate(app, csrf, 'post', '/validators')
+        .send({
+          address: wallet.address,
+          publicKey: wallet.signingKey.compressedPublicKey,
+          stake: (20n * ETHER).toString(),
+          endpoint: 'http://validator-4:9090',
+        })
+        .expect(201);
+
+      // Same epoch, but the registration went through this instance.
+      const after = await request(app.getHttpServer()).get('/validators/set').expect(200);
+      expect(after.body.epoch).toBeGreaterThanOrEqual(before.body.epoch);
+      expect(after.body.validators).toHaveLength(before.body.validators.length + 1);
+      expect(after.body.validators).toContainEqual({ id: registered.body.id, tier: 'gold', weight: 4 });
+      expect(after.body.totalWeight).toBe(before.body.totalWeight + 4);
+
+      // Unchanged set: the snapshot is reused, not rebuilt.
+      const again = await request(app.getHttpServer()).get('/validators/set').expect(200);
+      if (again.body.epoch === after.body.epoch) {
+        expect(again.body.takenAt).toBe(after.body.takenAt);
+      }
+
+      await mutate(app, csrf, 'delete', `/validators/${registered.body.id}`).expect(200);
+      const gone = await request(app.getHttpServer()).get('/validators/set').expect(200);
+      expect(gone.body.validators.map((v: { id: string }) => v.id)).not.toContain(registered.body.id);
+    });
+
     it('rejects a stake that is not an integer amount of wei', async () => {
       const wallet = ethers.Wallet.createRandom();
       const registered = await mutate(app, csrf, 'post', '/validators')

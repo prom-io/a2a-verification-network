@@ -5,6 +5,11 @@ import { In, Repository } from 'typeorm';
 import { Validator } from './entities/validator.entity';
 import { RegisterValidatorDto } from './dto/register-validator.dto';
 import {
+  EligibleValidator,
+  ValidatorSetCache,
+  ValidatorSetSnapshot,
+} from './validator-set.cache';
+import {
   StakingTier,
   TierDefinition,
   buildTierTable,
@@ -15,11 +20,7 @@ import {
 const DEFAULT_MIN_STAKE_WEI = '1000000000000000000';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export interface EligibleValidator {
-  id: string;
-  tier: StakingTier;
-  weight: number;
-}
+export type { EligibleValidator } from './validator-set.cache';
 
 @Injectable()
 export class ValidatorsService {
@@ -29,6 +30,7 @@ export class ValidatorsService {
     @InjectRepository(Validator)
     private readonly validatorRepo: Repository<Validator>,
     private readonly configService: ConfigService,
+    private readonly setCache: ValidatorSetCache,
   ) {
     const minStake = this.configService.get<string>(
       'security.validators.minStakeWei',
@@ -46,7 +48,9 @@ export class ValidatorsService {
       endpoint: dto.endpoint,
       capabilities: dto.capabilities ?? [],
     });
-    return this.validatorRepo.save(validator);
+    const saved = await this.validatorRepo.save(validator);
+    this.setCache.invalidate();
+    return saved;
   }
 
   async findAll(): Promise<Validator[]> {
@@ -74,7 +78,9 @@ export class ValidatorsService {
     const validator = await this.findOne(id);
     validator.isActive = false;
     validator.exitedAt = validator.exitedAt ?? new Date();
-    return this.validatorRepo.save(validator);
+    const saved = await this.validatorRepo.save(validator);
+    this.setCache.invalidate();
+    return saved;
   }
 
   /** Sets the validator's total stake and moves it to the matching tier. */
@@ -82,7 +88,9 @@ export class ValidatorsService {
     const validator = await this.findOne(id);
     validator.stake = stake;
     validator.tier = this.tierOf(stake).tier;
-    return this.validatorRepo.save(validator);
+    const saved = await this.validatorRepo.save(validator);
+    this.setCache.invalidate();
+    return saved;
   }
 
   /** Tier thresholds and weights in effect, with stakes as wei strings. */
@@ -101,6 +109,18 @@ export class ValidatorsService {
    * takes effect without rewriting every row.
    */
   async findEligible(): Promise<EligibleValidator[]> {
+    return [...(await this.eligibleSet()).validators];
+  }
+
+  /**
+   * The eligible set as committee selection sees it: read once per epoch and
+   * served from memory in between (see ValidatorSetCache).
+   */
+  async eligibleSet(): Promise<ValidatorSetSnapshot> {
+    return this.setCache.get(() => this.loadEligible());
+  }
+
+  private async loadEligible(): Promise<EligibleValidator[]> {
     const active = await this.validatorRepo.findBy({ isActive: true });
     return active
       .map((validator) => {

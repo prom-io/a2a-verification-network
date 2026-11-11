@@ -14,6 +14,7 @@ import { ethers } from 'ethers';
 import { Repository } from 'typeorm';
 import { HeartbeatDto } from './dto/heartbeat.dto';
 import { Validator } from './entities/validator.entity';
+import { ValidatorSetCache } from './validator-set.cache';
 
 export const SUSPENSION_MISSED_HEARTBEAT = 'missed_heartbeat';
 
@@ -55,6 +56,7 @@ export class ValidatorAvailabilityService implements OnModuleInit, OnModuleDestr
     @InjectRepository(Validator)
     private readonly validatorRepo: Repository<Validator>,
     private readonly configService: ConfigService,
+    private readonly setCache: ValidatorSetCache,
   ) {}
 
   onModuleInit(): void {
@@ -111,6 +113,8 @@ export class ValidatorAvailabilityService implements OnModuleInit, OnModuleDestr
       this.logger.log(`Validator ${id} reactivated by heartbeat`);
     }
     const saved = await this.validatorRepo.save(validator);
+    // Only a reactivation changes who is eligible; a routine heartbeat does not.
+    if (reactivated) this.setCache.invalidate();
     return { ...this.view(saved), reactivated };
   }
 
@@ -138,6 +142,7 @@ export class ValidatorAvailabilityService implements OnModuleInit, OnModuleDestr
       await this.validatorRepo.save(validator);
     }
     if (stale.length > 0) {
+      this.setCache.invalidate();
       this.logger.warn(
         `Suspended ${stale.length} validator(s) for missed heartbeats: ${stale.map((v) => v.id).join(', ')}`,
       );

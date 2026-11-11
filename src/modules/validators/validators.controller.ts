@@ -34,6 +34,12 @@ export class ValidatorsController {
     return this.validatorsService.tierTable();
   }
 
+  @Get('set')
+  @ApiOperation({ summary: 'Eligible validator set used for committee draws in the current epoch' })
+  eligibleSet() {
+    return this.validatorsService.eligibleSet();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get validator by ID' })
   @ApiResponse({ status: 404, description: 'Validator not found' })
