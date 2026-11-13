@@ -4,6 +4,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import { ValidatorsModule } from '../validators/validators.module';
 import { VerdictsModule } from '../verdicts/verdicts.module';
 import { ReputationModule } from '../reputation/reputation.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { ReputationModule } from '../reputation/reputation.module';
     ValidatorsModule,
     forwardRef(() => VerdictsModule),
     ReputationModule,
+    WebhooksModule,
   ],
   providers: [CoordinatorService],
   exports: [CoordinatorService],

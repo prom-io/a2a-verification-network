@@ -18,6 +18,7 @@ import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
 import { ReputationService } from '../reputation/reputation.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitVerdictDto } from './dto/commit-verdict.dto';
 import { RevealVerdictDto } from './dto/reveal-verdict.dto';
@@ -63,6 +64,7 @@ export class CommitRevealService {
     private readonly validatorsService: ValidatorsService,
     private readonly verdictsService: VerdictsService,
     private readonly reputationService: ReputationService,
+    private readonly webhooksService: WebhooksService,
   ) {}
 
   async commit(jobId: string, dto: CommitVerdictDto, now = new Date()): Promise<CommitmentView> {
@@ -217,6 +219,9 @@ export class CommitRevealService {
     const tally = this.tally(job, commitments);
     if (!tally.outcome) {
       await this.jobsService.updateStatus(job.id, JobStatus.FAILED);
+      await this.notify(job.id, () =>
+        this.webhooksService.notifyJobFailed(job, 'the committee did not reach a quorum'),
+      );
       this.logger.warn(
         `Job ${job.id} failed: no outcome reached the quorum of ${tally.quorum} ` +
           `(${JSON.stringify(tally.counts)})`,
@@ -224,7 +229,7 @@ export class CommitRevealService {
       return;
     }
 
-    await this.verdictsService.createAndPublish({
+    const verdict = await this.verdictsService.createAndPublish({
       sessionId: job.sessionId,
       jobId: job.id,
       outcome: tally.outcome,
@@ -233,6 +238,7 @@ export class CommitRevealService {
       validatorIds: tally.supporters,
     });
     await this.jobsService.updateStatus(job.id, JobStatus.COMPLETED);
+    await this.notify(job.id, () => this.webhooksService.notifyVerdict(job, verdict));
 
     // Validators that revealed the losing outcome were wrong about this job;
     // those that never revealed are left to the availability checks.
@@ -245,6 +251,15 @@ export class CommitRevealService {
       `Job ${job.id} finalized as ${tally.outcome} by ${tally.supporters.length} of ` +
         `${job.assignedValidators.length} validators`,
     );
+  }
+
+  /** The round is settled either way; a webhook that cannot be queued is logged. */
+  private async notify(jobId: string, send: () => Promise<unknown>): Promise<void> {
+    try {
+      await send();
+    } catch (error) {
+      this.logger.error(`Could not queue the webhook for job ${jobId}: ${(error as Error).message}`);
+    }
   }
 
   /** Never exposes the salt; the outcome is empty until the reveal. */

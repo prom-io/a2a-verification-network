@@ -48,6 +48,41 @@ describe('CommitRevealService', () => {
     expect(reputation.recordForValidators).toHaveBeenCalledWith([c.id], { accurate: false });
   });
 
+  it('tells the submitter about the verdict, or that there is none', async () => {
+    const decided = buildRound(1);
+    await decided.commit(decided.validators[0], VerdictOutcome.PARTIAL);
+    await decided.reveal(decided.validators[0], VerdictOutcome.PARTIAL);
+
+    expect(decided.webhooks.notifyVerdict).toHaveBeenCalledWith(
+      decided.job,
+      expect.objectContaining({ id: 'verdict-1', outcome: VerdictOutcome.PARTIAL }),
+    );
+    expect(decided.webhooks.notifyJobFailed).not.toHaveBeenCalled();
+
+    const split = buildRound(2);
+    await split.commit(split.validators[0], VerdictOutcome.ACCEPT);
+    await split.commit(split.validators[1], VerdictOutcome.REJECT);
+    await split.reveal(split.validators[0], VerdictOutcome.ACCEPT);
+    await split.reveal(split.validators[1], VerdictOutcome.REJECT);
+
+    expect(split.webhooks.notifyJobFailed).toHaveBeenCalledWith(
+      split.job,
+      'the committee did not reach a quorum',
+    );
+    expect(split.webhooks.notifyVerdict).not.toHaveBeenCalled();
+  });
+
+  it('settles the round even when the webhook cannot be queued', async () => {
+    const { validators, commit, reveal, webhooks, job } = buildRound(1);
+    webhooks.notifyVerdict.mockRejectedValueOnce(new Error('database unavailable'));
+    await commit(validators[0], VerdictOutcome.ACCEPT);
+
+    const round = await reveal(validators[0], VerdictOutcome.ACCEPT);
+
+    expect(round.phase).toBe('finalized');
+    expect(job.status).toBe(JobStatus.COMPLETED);
+  });
+
   it('records no reputation for a round that reached no verdict', async () => {
     const { validators, commit, reveal, reputation } = buildRound(2);
     await commit(validators[0], VerdictOutcome.ACCEPT);

@@ -1,10 +1,11 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { VerificationJob, JobStatus, VerdictMode } from './entities/verification-job.entity';
 import { SubmitJobDto } from './dto/submit-job.dto';
 import { PriorityOptions } from './priority';
+import { forbiddenTargetReason } from '../webhooks/webhook-signature';
 
 @Injectable()
 export class JobsService {
@@ -17,6 +18,16 @@ export class JobsService {
   ) {}
 
   async submit(dto: SubmitJobDto): Promise<VerificationJob> {
+    if (dto.callbackUrl) {
+      // Refused here rather than at delivery time, so the submitter finds out
+      // while it can still do something about it.
+      const refusal = forbiddenTargetReason(
+        dto.callbackUrl,
+        String(this.configService.get('WEBHOOK_ALLOW_PRIVATE_TARGETS', 'false')) === 'true',
+      );
+      if (refusal) throw new BadRequestException(`callbackUrl cannot be used: ${refusal}`);
+    }
+
     const job = this.jobRepo.create({
       sessionId: dto.sessionId,
       requestHash: dto.requestHash,
@@ -25,6 +36,7 @@ export class JobsService {
       artifactsRef: dto.artifactsRef ?? null,
       verdictMode: dto.verdictMode ?? VerdictMode.INSTANT,
       fee: dto.fee ?? '0',
+      callbackUrl: dto.callbackUrl ?? null,
       status: JobStatus.PENDING,
     });
     const saved = await this.jobRepo.save(job);

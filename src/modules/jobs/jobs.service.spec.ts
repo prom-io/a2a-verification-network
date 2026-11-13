@@ -124,6 +124,29 @@ describe('JobsService', () => {
     expect((await service.submit({ ...dto, fee: '2500000000000000' })).fee).toBe('2500000000000000');
   });
 
+  it('stores a public callback URL and refuses internal ones', async () => {
+    const { service } = build();
+
+    const job = await service.submit({ ...dto, callbackUrl: 'https://agent.example.org/hooks/verdict' });
+    expect(job.callbackUrl).toBe('https://agent.example.org/hooks/verdict');
+    expect((await service.submit(dto)).callbackUrl).toBeNull();
+
+    await expect(
+      service.submit({ ...dto, callbackUrl: 'http://169.254.169.254/latest/meta-data' }),
+    ).rejects.toThrow('callbackUrl cannot be used');
+    await expect(service.submit({ ...dto, callbackUrl: 'http://localhost:3002/jobs' })).rejects.toThrow(
+      'not publicly routable',
+    );
+  });
+
+  it('accepts internal callback URLs only when explicitly allowed', async () => {
+    const { service } = build({ WEBHOOK_ALLOW_PRIVATE_TARGETS: 'true' });
+
+    const job = await service.submit({ ...dto, callbackUrl: 'http://127.0.0.1:8080/hook' });
+
+    expect(job.callbackUrl).toBe('http://127.0.0.1:8080/hook');
+  });
+
   it('lets only one caller claim a pending job', async () => {
     const { service } = build();
     const job = await service.submit(dto);

@@ -25,6 +25,7 @@ import { ReputationModule } from './modules/reputation/reputation.module';
 import { PoliciesModule } from './modules/policies/policies.module';
 import { CommitRevealModule } from './modules/commit-reveal/commit-reveal.module';
 import { SlashingModule } from './modules/slashing/slashing.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { SlashingModule } from './modules/slashing/slashing.module';
     PoliciesModule,
     CommitRevealModule,
     SlashingModule,
+    WebhooksModule,
   ],
   providers: [
     PinoLoggerService,

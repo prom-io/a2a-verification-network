@@ -4,6 +4,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import { ValidatorsModule } from '../validators/validators.module';
 import { VerdictsModule } from '../verdicts/verdicts.module';
 import { ReputationModule } from '../reputation/reputation.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitRevealController } from './commit-reveal.controller';
 import { CommitRevealService } from './commit-reveal.service';
@@ -15,6 +16,7 @@ import { CommitRevealService } from './commit-reveal.service';
     ValidatorsModule,
     VerdictsModule,
     ReputationModule,
+    WebhooksModule,
   ],
   controllers: [CommitRevealController],
   providers: [CommitRevealService],

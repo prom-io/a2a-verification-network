@@ -3,6 +3,7 @@ import { JobsService } from '../jobs/jobs.service';
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import { JobStatus, VerdictMode } from '../jobs/entities/verification-job.entity';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
 import { selectWeighted } from '../validators/staking-tiers';
@@ -22,6 +23,7 @@ export class CoordinatorService {
     private readonly validatorsService: ValidatorsService,
     private readonly verdictsService: VerdictsService,
     private readonly reputationService: ReputationService,
+    private readonly webhooksService: WebhooksService,
   ) {}
 
   async processJob(jobId: string): Promise<{
@@ -73,6 +75,12 @@ export class CoordinatorService {
       validators.filter((id) => id !== SELF_VALIDATOR),
       { accurate: true },
     );
+    // The verdict stands whether or not the submitter can be told about it.
+    await this.webhooksService
+      .notifyVerdict(job, verdict)
+      .catch((error: Error) =>
+        this.logger.error(`Could not queue the verdict webhook for job ${jobId}: ${error.message}`),
+      );
 
     this.logger.log(`Job ${jobId} completed with outcome: ${outcome}`);
 

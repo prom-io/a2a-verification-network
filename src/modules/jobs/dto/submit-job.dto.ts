@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsUUID,
+  IsUrl,
   Matches,
   MaxLength,
 } from 'class-validator';
@@ -68,4 +69,16 @@ export class SubmitJobDto {
   @IsOptional()
   @IsBoolean()
   deferred?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description: 'HTTPS endpoint that receives a signed POST when the job has a verdict or fails',
+  })
+  @IsOptional()
+  @IsUrl(
+    { protocols: ['http', 'https'], require_protocol: true, require_tld: false },
+    { message: 'callbackUrl must be an http(s) URL' },
+  )
+  @MaxLength(1024, { message: 'callbackUrl cannot exceed 1024 characters' })
+  callbackUrl?: string;
 }

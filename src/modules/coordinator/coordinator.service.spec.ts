@@ -3,6 +3,7 @@ import { JobsService } from '../jobs/jobs.service';
 import { ValidatorsService } from '../validators/validators.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import { JobStatus, VerdictMode } from '../jobs/entities/verification-job.entity';
 import { StakingTier, selectWeighted } from '../validators/staking-tiers';
 
@@ -28,13 +29,15 @@ function build(
     createAndPublish: jest.fn().mockResolvedValue({ id: 'verdict-1', txHash: undefined }),
   };
   const reputation = { recordForValidators: jest.fn().mockResolvedValue(undefined) };
+  const webhooks = { notifyVerdict: jest.fn().mockResolvedValue(null) };
   const service = new CoordinatorService(
     jobs as unknown as JobsService,
     validators as unknown as ValidatorsService,
     verdicts as unknown as VerdictsService,
     reputation as unknown as ReputationService,
+    webhooks as unknown as WebhooksService,
   );
-  return { service, jobs, validators, verdicts, reputation };
+  return { service, jobs, validators, verdicts, reputation, webhooks };
 }
 
 const pool = [
@@ -120,6 +123,25 @@ describe('CoordinatorService committee assignment', () => {
     await service.processJob('job-1');
 
     expect(reputation.recordForValidators).toHaveBeenCalledWith([], { accurate: true });
+  });
+
+  it('queues the verdict webhook for the submitter', async () => {
+    const { service, webhooks } = build(pool);
+
+    await service.processJob('job-1');
+
+    expect(webhooks.notifyVerdict).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1', sessionId: 'session-1' }),
+      expect.objectContaining({ id: 'verdict-1' }),
+    );
+  });
+
+  it('completes the job even when the webhook cannot be queued', async () => {
+    const { service, webhooks, jobs } = build(pool);
+    webhooks.notifyVerdict.mockRejectedValueOnce(new Error('database unavailable'));
+
+    await expect(service.processJob('job-1')).resolves.toMatchObject({ verdictId: 'verdict-1' });
+    expect(jobs.updateStatus).toHaveBeenLastCalledWith('job-1', JobStatus.COMPLETED);
   });
 
   it('leaves a commit-reveal job to its committee instead of issuing a verdict', async () => {

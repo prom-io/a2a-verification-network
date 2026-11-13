@@ -146,7 +146,8 @@ for `release`).
 
 Application secrets never pass through GitHub. They live on the staging host in
 `<deploy path>/.env.staging` (template: `.env.staging.example`):
-`POSTGRES_PASSWORD`, `JWT_SECRET`, `CSRF_SECRET`, `BLOCKCHAIN_RPC_URL`,
+`POSTGRES_PASSWORD`, `JWT_SECRET`, `CSRF_SECRET`, `WEBHOOK_SIGNING_SECRET`,
+`BLOCKCHAIN_RPC_URL`,
 `BLOCKCHAIN_PRIVATE_KEY` and the four contract addresses from
 `docs/TESTNET.md`. Create the file once with mode `600`; the workflow only
 supplies the image coordinates.

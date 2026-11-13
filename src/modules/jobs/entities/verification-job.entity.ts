@@ -59,6 +59,10 @@ export class VerificationJob {
   @Column({ type: 'varchar', length: 16, default: VerdictMode.INSTANT })
   verdictMode!: VerdictMode;
 
+  /** Where the submitter wants to be told about the verdict, if anywhere. */
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  callbackUrl!: string | null;
+
   /** Fee offered by the submitter, in wei; orders the pending queue. */
   @Column({ type: 'numeric', precision: 78, scale: 0, default: 0 })
   fee!: string;

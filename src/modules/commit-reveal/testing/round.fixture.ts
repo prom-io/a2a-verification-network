@@ -11,6 +11,7 @@ import { ValidatorsService } from '../../validators/validators.service';
 import { VerdictsService } from '../../verdicts/verdicts.service';
 import { VerdictOutcome } from '../../verdicts/entities/verdict.entity';
 import { ReputationService } from '../../reputation/reputation.service';
+import { WebhooksService } from '../../webhooks/webhooks.service';
 import { CommitRevealService } from '../commit-reveal.service';
 import { computeCommitHash } from '../commitment';
 import { VerdictCommitment } from '../entities/verdict-commitment.entity';
@@ -96,6 +97,10 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
   };
 
   const reputation = { recordForValidators: jest.fn(async () => undefined) };
+  const webhooks = {
+    notifyVerdict: jest.fn(async () => null),
+    notifyJobFailed: jest.fn(async () => null),
+  };
 
   const service = new CommitRevealService(
     commitmentRepo as unknown as Repository<VerdictCommitment>,
@@ -103,6 +108,7 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
     validatorsService as unknown as ValidatorsService,
     verdicts as unknown as VerdictsService,
     reputation as unknown as ReputationService,
+    webhooks as unknown as WebhooksService,
   );
 
   /** Builds the commit payload a validator node would send. */
@@ -134,6 +140,7 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
     jobs,
     verdicts,
     reputation,
+    webhooks,
     commitPayload,
     commit,
     reveal,
