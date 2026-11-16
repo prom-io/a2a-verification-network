@@ -17,7 +17,8 @@ import {
   WebhookEvent,
 } from './entities/webhook-delivery.entity';
 import { WebhookHttpClient } from './webhook-http.client';
-import { SIGNATURE_HEADER, backoffMs, forbiddenTargetReason, signPayload } from './webhook-signature';
+import { backoffMs, buildSignedHeaders, forbiddenTargetReason } from './webhook-signature';
+import { SigningSecretSettings, activeSigningSecrets, signingSecretProblems } from './webhook-secrets';
 
 type NotifiableJob = Pick<VerificationJob, 'id' | 'sessionId' | 'callbackUrl'>;
 
@@ -44,6 +45,16 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    // Refuse to start rather than send deliveries anyone could forge.
+    const problems = signingSecretProblems(this.secretSettings());
+    if (problems.length > 0) {
+      throw new Error(`Webhook signing is misconfigured: ${problems.join('; ')}`);
+    }
+    const secrets = activeSigningSecrets(this.secretSettings());
+    if (secrets.length > 1) {
+      this.logger.log('Webhook secret rotation in progress: deliveries carry two signatures');
+    }
+
     const pollMs = Number(this.configService.get('WEBHOOK_RETRY_POLL_MS', 30_000));
     if (!(pollMs > 0)) return;
     this.timer = setInterval(() => {
@@ -131,15 +142,17 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
       return this.deliveryRepo.save(delivery);
     }
 
-    const body = JSON.stringify(delivery.payload);
-    const secret = this.configService.get<string>('WEBHOOK_SIGNING_SECRET', 'dev-webhook-secret-change-me');
-    const headers = {
-      'content-type': 'application/json',
-      'user-agent': 'prom-verification-network-webhooks',
-      'x-prom-event': delivery.event,
-      'x-prom-delivery': delivery.id,
-      [SIGNATURE_HEADER]: signPayload(secret, Math.floor(now.getTime() / 1000), body),
-    };
+    // The delivery id goes into the signed body as well as the header, so a
+    // receiver can use it as an idempotency key that cannot be swapped out.
+    const body = JSON.stringify({ ...delivery.payload, deliveryId: delivery.id });
+    const headers = buildSignedHeaders({
+      secrets: activeSigningSecrets(this.secretSettings(), now),
+      deliveryId: delivery.id,
+      event: delivery.event,
+      attempt: delivery.attempts,
+      body,
+      now,
+    });
 
     let failure: string | null = null;
     try {
@@ -178,6 +191,15 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
       );
     }
     return this.deliveryRepo.save(delivery);
+  }
+
+  private secretSettings(): SigningSecretSettings {
+    return {
+      current: this.configService.get<string>('WEBHOOK_SIGNING_SECRET'),
+      previous: this.configService.get<string>('WEBHOOK_SIGNING_SECRET_PREVIOUS'),
+      previousUntil: this.configService.get<string>('WEBHOOK_SIGNING_SECRET_PREVIOUS_UNTIL'),
+      nodeEnv: this.configService.get<string>('NODE_ENV'),
+    };
   }
 
   private async enqueue(

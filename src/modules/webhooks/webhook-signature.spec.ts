@@ -1,5 +1,18 @@
 import { createHmac } from 'crypto';
-import { backoffMs, forbiddenTargetReason, signPayload, verifySignature } from './webhook-signature';
+import {
+  ATTEMPT_HEADER,
+  DELIVERY_HEADER,
+  EVENT_HEADER,
+  SIGNATURE_HEADER,
+  TIMESTAMP_HEADER,
+  backoffMs,
+  buildSignedHeaders,
+  forbiddenTargetReason,
+  parseSignatureHeader,
+  signPayload,
+  verifySignature,
+  verifyWebhookRequest,
+} from './webhook-signature';
 
 const SECRET = 'whsec_test';
 const BODY = JSON.stringify({ event: 'verdict.published', jobId: 'job-1' });
@@ -35,6 +48,101 @@ describe('webhook signatures', () => {
     expect(verifySignature(SECRET, header, BODY, later(301))).toBe(false);
     expect(verifySignature(SECRET, header, BODY, later(-301))).toBe(false);
     expect(verifySignature(SECRET, header, BODY, later(900), 1000)).toBe(true);
+  });
+});
+
+describe('signatures during a secret rotation', () => {
+  const OLD = 'whsec_old';
+  const header = signPayload([SECRET, OLD], T, BODY);
+
+  it('carries one v1 per secret, current first', () => {
+    const current = createHmac('sha256', SECRET).update(`${T}.${BODY}`).digest('hex');
+    const previous = createHmac('sha256', OLD).update(`${T}.${BODY}`).digest('hex');
+
+    expect(header).toBe(`t=${T},v1=${current},v1=${previous}`);
+    expect(parseSignatureHeader(header)).toEqual({ timestamp: T, signatures: [current, previous] });
+  });
+
+  it('is accepted by receivers holding either secret, and by one holding both', () => {
+    expect(verifySignature(SECRET, header, BODY, NOW)).toBe(true);
+    expect(verifySignature(OLD, header, BODY, NOW)).toBe(true);
+    expect(verifySignature([OLD, SECRET], header, BODY, NOW)).toBe(true);
+    expect(verifySignature('whsec_unrelated', header, BODY, NOW)).toBe(false);
+  });
+
+  it('refuses to sign without a secret', () => {
+    expect(() => signPayload([], T, BODY)).toThrow('at least one signing secret');
+  });
+});
+
+describe('parseSignatureHeader', () => {
+  const hex = 'ab'.repeat(32);
+
+  it('skips schemes it does not know and tolerates spaces', () => {
+    expect(parseSignatureHeader(`t=${T}, v2=zzz, v1=${hex}`)).toEqual({
+      timestamp: T,
+      signatures: [hex],
+    });
+  });
+
+  it.each([undefined, '', `v1=${hex}`, `t=${T}`, `t=abc,v1=${hex}`, `t=${T},v1=nothex`])(
+    'returns null for %p',
+    (value) => {
+      expect(parseSignatureHeader(value)).toBeNull();
+    },
+  );
+});
+
+describe('verifyWebhookRequest', () => {
+  const signature = signPayload(SECRET, T, BODY);
+
+  it('accepts a request whose timestamp header matches the signed one', () => {
+    expect(
+      verifyWebhookRequest({ secrets: SECRET, signature, timestamp: String(T), body: BODY, now: NOW }),
+    ).toEqual({ valid: true });
+  });
+
+  it.each([
+    [{ signature: undefined }, 'missing_signature'],
+    [{ signature: 'garbage' }, 'malformed_signature'],
+    [{ timestamp: String(T + 1) }, 'timestamp_mismatch'],
+    [{ now: new Date(NOW.getTime() + 600_000) }, 'stale_timestamp'],
+    [{ body: `${BODY} ` }, 'signature_mismatch'],
+    [{ secrets: ['nope', 'still-nope'] }, 'signature_mismatch'],
+  ])('rejects %p with %s', (override, reason) => {
+    expect(
+      verifyWebhookRequest({ secrets: SECRET, signature, body: BODY, now: NOW, ...override }),
+    ).toEqual({ valid: false, reason });
+  });
+});
+
+describe('buildSignedHeaders', () => {
+  it('signs the attempt with the time of sending and labels it', () => {
+    const headers = buildSignedHeaders({
+      secrets: [SECRET],
+      deliveryId: 'delivery-7',
+      event: 'job.failed',
+      attempt: 3,
+      body: BODY,
+      now: NOW,
+    });
+
+    expect(headers).toMatchObject({
+      'content-type': 'application/json',
+      [EVENT_HEADER]: 'job.failed',
+      [DELIVERY_HEADER]: 'delivery-7',
+      [ATTEMPT_HEADER]: '3',
+      [TIMESTAMP_HEADER]: String(T),
+    });
+    expect(
+      verifyWebhookRequest({
+        secrets: SECRET,
+        signature: headers[SIGNATURE_HEADER],
+        timestamp: headers[TIMESTAMP_HEADER],
+        body: BODY,
+        now: NOW,
+      }),
+    ).toEqual({ valid: true });
   });
 });
 

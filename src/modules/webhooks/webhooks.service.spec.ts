@@ -8,7 +8,7 @@ import {
   WebhookEvent,
 } from './entities/webhook-delivery.entity';
 import { WebhookHttpClient } from './webhook-http.client';
-import { verifySignature } from './webhook-signature';
+import { verifySignature, verifyWebhookRequest } from './webhook-signature';
 import { WebhooksService } from './webhooks.service';
 
 const NOW = new Date('2026-05-01T12:00:00.000Z');
@@ -135,6 +135,75 @@ describe('WebhooksService notifications', () => {
       reason: 'the committee did not reach a quorum',
     });
     expect(headers['x-prom-event']).toBe('job.failed');
+  });
+});
+
+describe('WebhooksService signing', () => {
+  const OLD = 'whsec_previous';
+
+  it('puts the delivery id and attempt into the signed request', async () => {
+    const { service, http } = build();
+
+    await service.notifyVerdict(job, verdict);
+    await settle();
+
+    const [, body, headers] = http.post.mock.calls[0];
+    expect(JSON.parse(body).deliveryId).toBe('delivery-1');
+    expect(headers).toMatchObject({ 'x-prom-attempt': '1', 'x-prom-delivery': 'delivery-1' });
+    expect(
+      verifyWebhookRequest({
+        secrets: SECRET,
+        signature: headers['x-prom-signature'],
+        timestamp: headers['x-prom-timestamp'],
+        body,
+      }),
+    ).toEqual({ valid: true });
+  });
+
+  it('signs with both secrets while a rotation is open and drops the old one after it', async () => {
+    const { service, http, repo } = build({
+      WEBHOOK_SIGNING_SECRET_PREVIOUS: OLD,
+      WEBHOOK_SIGNING_SECRET_PREVIOUS_UNTIL: later(3600).toISOString(),
+    });
+    http.post.mockResolvedValue({ status: 500 });
+    const delivery = await repo.save({
+      jobId: 'job-1',
+      sessionId: 'session-1',
+      url: job.callbackUrl,
+      event: WebhookEvent.VERDICT_PUBLISHED,
+      payload: { event: 'verdict.published', jobId: 'job-1' },
+      status: WebhookDeliveryStatus.PENDING,
+      attempts: 0,
+    } as unknown as WebhookDelivery);
+
+    await service.attempt(delivery, NOW);
+    await service.attempt(delivery, later(7200));
+
+    const [first, second] = http.post.mock.calls.map(([, body, headers]) => ({ body, headers }));
+    expect(first.headers['x-prom-signature'].match(/v1=/g)).toHaveLength(2);
+    expect(verifySignature(OLD, first.headers['x-prom-signature'], first.body, NOW)).toBe(true);
+    expect(verifySignature(SECRET, first.headers['x-prom-signature'], first.body, NOW)).toBe(true);
+
+    expect(second.headers['x-prom-signature'].match(/v1=/g)).toHaveLength(1);
+    expect(verifySignature(OLD, second.headers['x-prom-signature'], second.body, later(7200))).toBe(false);
+    expect(second.headers['x-prom-attempt']).toBe('2');
+  });
+
+  it('refuses to start in production with the development secret', () => {
+    const { service } = build({ NODE_ENV: 'production', WEBHOOK_SIGNING_SECRET: undefined });
+
+    expect(() => service.onModuleInit()).toThrow('WEBHOOK_SIGNING_SECRET must be set');
+  });
+
+  it('starts in production with a strong secret and a rotation in progress', () => {
+    const { service } = build({
+      NODE_ENV: 'production',
+      WEBHOOK_SIGNING_SECRET: 'n'.repeat(40),
+      WEBHOOK_SIGNING_SECRET_PREVIOUS: 'o'.repeat(40),
+      WEBHOOK_RETRY_POLL_MS: '0',
+    });
+
+    expect(() => service.onModuleInit()).not.toThrow();
   });
 });
 
