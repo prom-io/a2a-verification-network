@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 
 export interface WebhookResponse {
   status: number;
+  /** Raw Retry-After header, when the receiver sent one. */
+  retryAfter?: string | null;
 }
 
 /**
@@ -30,7 +32,7 @@ export class WebhookHttpClient {
       });
       // The body is of no interest; release the connection.
       await response.body?.cancel().catch(() => undefined);
-      return { status: response.status };
+      return { status: response.status, retryAfter: response.headers.get('retry-after') };
     } catch (error) {
       if (controller.signal.aborted) throw new Error(`timed out after ${timeoutMs}ms`);
       const cause = (error as { cause?: { code?: string; message?: string } }).cause;

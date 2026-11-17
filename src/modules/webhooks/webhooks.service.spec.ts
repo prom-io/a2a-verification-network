@@ -8,6 +8,7 @@ import {
   WebhookEvent,
 } from './entities/webhook-delivery.entity';
 import { WebhookHttpClient } from './webhook-http.client';
+import { DeadLetterReason } from './webhook-retry';
 import { verifySignature, verifyWebhookRequest } from './webhook-signature';
 import { WebhooksService } from './webhooks.service';
 
@@ -40,17 +41,28 @@ function build(env: Record<string, unknown> = {}) {
       }
       return delivery;
     }),
-    find: jest.fn(async ({ where }: { where: Partial<WebhookDelivery> & { nextAttemptAt?: unknown } }) =>
-      rows.filter(
-        (row) =>
-          (where.jobId === undefined || row.jobId === where.jobId) &&
-          (where.status === undefined || row.status === where.status),
-      ),
+    find: jest.fn(
+      async ({ where, take }: { where: Record<string, unknown>; take?: number }) => {
+        const ids = where.id as { value?: string[] } | undefined;
+        return rows
+          .filter(
+            (row) =>
+              (where.jobId === undefined || row.jobId === where.jobId) &&
+              (where.status === undefined || row.status === where.status) &&
+              (ids === undefined || (ids.value ?? []).includes(row.id)),
+          )
+          .slice(0, take ?? rows.length);
+      },
     ),
     findOneBy: jest.fn(async ({ id }: { id: string }) => rows.find((row) => row.id === id) ?? null),
   };
   const http = { post: jest.fn().mockResolvedValue({ status: 204 }) };
-  const settings: Record<string, unknown> = { WEBHOOK_SIGNING_SECRET: SECRET, ...env };
+  // Jitter off unless a test turns it on, so delays can be asserted exactly.
+  const settings: Record<string, unknown> = {
+    WEBHOOK_SIGNING_SECRET: SECRET,
+    WEBHOOK_BACKOFF_JITTER: 0,
+    ...env,
+  };
   const config = {
     get: jest.fn((key: string, fallback?: unknown) => settings[key] ?? fallback),
   };
@@ -277,9 +289,11 @@ describe('WebhooksService retries', () => {
     await service.attempt(delivery, later(90));
 
     expect(delivery).toMatchObject({
-      status: WebhookDeliveryStatus.FAILED,
+      status: WebhookDeliveryStatus.DEAD_LETTER,
       attempts: 3,
       nextAttemptAt: null,
+      deadLetterReason: DeadLetterReason.EXHAUSTED,
+      deadLetteredAt: later(90),
     });
   });
 
@@ -307,7 +321,8 @@ describe('WebhooksService retries', () => {
     await service.attempt(delivery, NOW);
 
     expect(http.post).not.toHaveBeenCalled();
-    expect(delivery.status).toBe(WebhookDeliveryStatus.FAILED);
+    expect(delivery.status).toBe(WebhookDeliveryStatus.DEAD_LETTER);
+    expect(delivery.deadLetterReason).toBe(DeadLetterReason.TARGET_REFUSED);
     expect(delivery.lastError).toContain('target refused');
     expect(delivery.nextAttemptAt).toBeNull();
   });
@@ -346,7 +361,7 @@ describe('WebhooksService retries', () => {
     http.post.mockResolvedValueOnce({ status: 500 }).mockResolvedValueOnce({ status: 200 });
     const delivery = await repo.save(pendingDelivery());
     await service.attempt(delivery, NOW);
-    expect(delivery.status).toBe(WebhookDeliveryStatus.FAILED);
+    expect(delivery.status).toBe(WebhookDeliveryStatus.DEAD_LETTER);
 
     const redelivered = await service.redeliver(delivery.id, later(600));
 
@@ -361,6 +376,171 @@ describe('WebhooksService retries', () => {
     await repo.save(pendingDelivery({ jobId: 'job-2' }));
 
     expect(await service.listForJob('job-1')).toHaveLength(1);
+  });
+});
+
+describe('WebhooksService dead-letter queue', () => {
+  const failing = (overrides: Partial<WebhookDelivery> = {}) =>
+    ({
+      jobId: 'job-1',
+      sessionId: 'session-1',
+      url: job.callbackUrl,
+      event: WebhookEvent.VERDICT_PUBLISHED,
+      payload: { event: 'verdict.published', jobId: 'job-1' },
+      status: WebhookDeliveryStatus.PENDING,
+      attempts: 0,
+      lastStatusCode: null,
+      lastError: null,
+      nextAttemptAt: null,
+      deliveredAt: null,
+      deadLetteredAt: null,
+      deadLetterReason: null,
+      replayedAt: null,
+      replays: 0,
+      ...overrides,
+    }) as WebhookDelivery;
+
+  it.each([
+    [410, DeadLetterReason.GONE],
+    [400, DeadLetterReason.REJECTED],
+    [422, DeadLetterReason.REJECTED],
+  ])('dead-letters at once when the receiver answers %i', async (status, reason) => {
+    const { service, http, repo } = build();
+    http.post.mockResolvedValue({ status });
+    const delivery = await repo.save(failing());
+
+    await service.attempt(delivery, NOW);
+
+    expect(delivery).toMatchObject({
+      status: WebhookDeliveryStatus.DEAD_LETTER,
+      attempts: 1,
+      deadLetterReason: reason,
+      lastStatusCode: status,
+      lastError: `receiver answered ${status}`,
+    });
+  });
+
+  it('keeps retrying 429 and auth errors, honouring Retry-After', async () => {
+    const { service, http, repo } = build();
+    http.post
+      .mockResolvedValueOnce({ status: 429, retryAfter: '600' })
+      .mockResolvedValueOnce({ status: 401 });
+    const delivery = await repo.save(failing());
+
+    await service.attempt(delivery, NOW);
+    expect(delivery.status).toBe(WebhookDeliveryStatus.PENDING);
+    expect(delivery.nextAttemptAt).toEqual(later(600));
+
+    await service.attempt(delivery, later(600));
+    expect(delivery.status).toBe(WebhookDeliveryStatus.PENDING);
+    expect(delivery.nextAttemptAt).toEqual(later(600 + 60));
+  });
+
+  it('spreads retries with jitter but never beyond the plain backoff', async () => {
+    const { service, http, repo } = build({ WEBHOOK_BACKOFF_JITTER: 0.5 });
+    http.post.mockResolvedValue({ status: 503 });
+    const delays: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const delivery = await repo.save(failing());
+      await service.attempt(delivery, NOW);
+      delays.push((delivery.nextAttemptAt as Date).getTime() - NOW.getTime());
+    }
+
+    for (const delay of delays) {
+      expect(delay).toBeGreaterThan(15_000);
+      expect(delay).toBeLessThanOrEqual(30_000);
+    }
+    expect(new Set(delays).size).toBeGreaterThan(1);
+  });
+
+  it('dead-letters a delivery that would be retried after its maximum age', async () => {
+    const { service, http, repo } = build({ WEBHOOK_MAX_AGE_HOURS: 1, WEBHOOK_MAX_ATTEMPTS: 50 });
+    http.post.mockResolvedValue({ status: 500 });
+    const delivery = await repo.save(failing({ attempts: 7 }));
+
+    // Attempt 8 fails 50 minutes in; the next try would be an hour later.
+    await service.attempt(delivery, later(3000));
+
+    expect(delivery).toMatchObject({
+      status: WebhookDeliveryStatus.DEAD_LETTER,
+      deadLetterReason: DeadLetterReason.EXPIRED,
+      nextAttemptAt: null,
+    });
+  });
+
+  it('lists the queue and replays it with a fresh set of attempts', async () => {
+    const { service, http, repo, rows } = build({ WEBHOOK_MAX_ATTEMPTS: 1 });
+    http.post.mockResolvedValue({ status: 500 });
+    const first = await repo.save(failing());
+    const second = await repo.save(failing({ jobId: 'job-2' }));
+    await service.attempt(first, NOW);
+    await service.attempt(second, NOW);
+    await repo.save(failing({ url: 'http://10.0.0.1/hook' }));
+    await service.attempt(rows[2], NOW);
+
+    expect(await service.listDeadLetters()).toHaveLength(3);
+    expect(await service.listDeadLetters(50, 'job-2')).toEqual([second]);
+
+    const replayed = await service.replayDeadLetters({}, later(60));
+
+    expect(replayed.map((d) => d.id)).toEqual([first.id, second.id]);
+    expect(first).toMatchObject({
+      status: WebhookDeliveryStatus.PENDING,
+      attempts: 0,
+      replays: 1,
+      nextAttemptAt: later(60),
+      replayedAt: later(60),
+      deadLetteredAt: null,
+      deadLetterReason: null,
+    });
+    // The refused target stays where it is.
+    expect(rows[2].status).toBe(WebhookDeliveryStatus.DEAD_LETTER);
+
+    http.post.mockResolvedValue({ status: 200 });
+    expect(await service.retryDue(later(60))).toBe(2);
+    expect(first.status).toBe(WebhookDeliveryStatus.DELIVERED);
+  });
+
+  it('replays only the requested ids that are actually dead-lettered', async () => {
+    const { service, http, repo } = build({ WEBHOOK_MAX_ATTEMPTS: 1 });
+    http.post.mockResolvedValue({ status: 500 });
+    const dead = await repo.save(failing());
+    await service.attempt(dead, NOW);
+    const pending = await repo.save(failing());
+
+    const replayed = await service.replayDeadLetters({ ids: [dead.id, pending.id, 'missing'] }, NOW);
+
+    expect(replayed).toEqual([dead]);
+  });
+
+  it('counts the maximum age of a replayed delivery from the replay', async () => {
+    const { service, http, repo } = build({ WEBHOOK_MAX_AGE_HOURS: 1 });
+    http.post.mockResolvedValue({ status: 500 });
+    const delivery = await repo.save(
+      failing({ status: WebhookDeliveryStatus.DEAD_LETTER, deadLetterReason: DeadLetterReason.EXHAUSTED }),
+    );
+    await service.replayDeadLetters({ ids: [delivery.id] }, later(86_400));
+
+    await service.attempt(delivery, later(86_400));
+
+    expect(delivery.status).toBe(WebhookDeliveryStatus.PENDING);
+    expect(delivery.nextAttemptAt).toEqual(later(86_400 + 30));
+  });
+
+  it('leaves a dead letter in the queue when a manual redelivery fails again', async () => {
+    const { service, http, repo } = build({ WEBHOOK_MAX_ATTEMPTS: 1 });
+    http.post.mockResolvedValue({ status: 503 });
+    const delivery = await repo.save(failing());
+    await service.attempt(delivery, NOW);
+
+    await service.redeliver(delivery.id, later(600));
+
+    expect(delivery).toMatchObject({
+      status: WebhookDeliveryStatus.DEAD_LETTER,
+      attempts: 2,
+      deadLetteredAt: later(600),
+      nextAttemptAt: null,
+    });
   });
 });
 

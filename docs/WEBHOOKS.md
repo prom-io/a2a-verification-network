@@ -46,6 +46,30 @@ Reject requests whose timestamp is more than five minutes away from your
 clock: that is what makes a captured request useless later. Every retry is
 signed again with its own time, so a retry is never stale on arrival.
 
+## Retries and the dead-letter queue
+
+Any answer other than `2xx` counts as a failure; redirects are not followed.
+Failed deliveries are retried after 30 s, 1 min, 2 min, ... up to one hour
+between attempts, each delay shortened by up to 20% so a receiver that comes
+back is not hit by every queued delivery at once. A `Retry-After` header is
+honoured when it asks for longer (never beyond the one-hour cap).
+
+A delivery stops being retried and moves to the dead-letter queue when
+
+| Reason | When |
+| --- | --- |
+| `exhausted` | `WEBHOOK_MAX_ATTEMPTS` attempts failed |
+| `expired` | the next try would be more than `WEBHOOK_MAX_AGE_HOURS` after it was created |
+| `gone` | the receiver answered `410 Gone` |
+| `rejected` | the receiver answered `400`, `413`, `415` or `422`: the request itself is refused |
+| `target_refused` | the callback URL points at a private or otherwise forbidden address |
+
+`GET /webhooks/dead-letters` lists the queue. `POST /webhooks/dead-letters/replay`
+with `{ "ids": [...] }` (or `{ "limit": n }` for the oldest `n`) puts deliveries
+back on the schedule with a fresh set of attempts; `target_refused` deliveries
+are never replayed. `POST /webhooks/deliveries/:id/redeliver` sends a single
+delivery at once.
+
 ## Rotating the secret
 
 1. Set `WEBHOOK_SIGNING_SECRET_PREVIOUS` to the current secret and

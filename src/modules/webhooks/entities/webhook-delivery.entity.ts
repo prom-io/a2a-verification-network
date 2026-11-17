@@ -9,13 +9,19 @@ export enum WebhookDeliveryStatus {
   /** Not delivered yet; retried at nextAttemptAt. */
   PENDING = 'pending',
   DELIVERED = 'delivered',
-  /** Gave up after the maximum number of attempts. */
-  FAILED = 'failed',
+  /**
+   * Not retried any more (attempts used up, expired, rejected by the
+   * receiver); waits in the dead-letter queue to be replayed or left alone.
+   */
+  DEAD_LETTER = 'dead_letter',
 }
 
 /** One notification owed to a job submitter, with its delivery history. */
 @Entity('webhook_deliveries')
 @Index('IDX_webhook_deliveries_due', ['status', 'nextAttemptAt'])
+@Index('IDX_webhook_deliveries_dead_letter', ['deadLetteredAt'], {
+  where: `"status" = 'dead_letter'`,
+})
 export class WebhookDelivery {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -56,4 +62,19 @@ export class WebhookDelivery {
 
   @Column({ type: 'timestamp', nullable: true })
   deliveredAt!: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deadLetteredAt!: Date | null;
+
+  /** A DeadLetterReason while dead-lettered. */
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  deadLetterReason!: string | null;
+
+  /** Last replay out of the dead-letter queue; the maximum age counts from it. */
+  @Column({ type: 'timestamp', nullable: true })
+  replayedAt!: Date | null;
+
+  /** How often the delivery was taken out of the dead-letter queue again. */
+  @Column({ type: 'int', default: 0 })
+  replays!: number;
 }
