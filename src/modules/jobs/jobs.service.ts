@@ -6,6 +6,7 @@ import { VerificationJob, JobStatus, VerdictMode } from './entities/verification
 import { SubmitJobDto } from './dto/submit-job.dto';
 import { PriorityOptions } from './priority';
 import { forbiddenTargetReason } from '../webhooks/webhook-signature';
+import { DEFAULT_THRESHOLD_BPS, QuorumWeighting } from '../commit-reveal/weighted-quorum';
 
 @Injectable()
 export class JobsService {
@@ -37,6 +38,7 @@ export class JobsService {
       verdictMode: dto.verdictMode ?? VerdictMode.INSTANT,
       fee: dto.fee ?? '0',
       callbackUrl: dto.callbackUrl ?? null,
+      quorumThresholdBps: dto.quorumThresholdBps ?? null,
       status: JobStatus.PENDING,
     });
     const saved = await this.jobRepo.save(job);
@@ -64,10 +66,31 @@ export class JobsService {
     return this.jobRepo.save(job);
   }
 
-  async assignValidators(id: string, validators: string[]): Promise<VerificationJob> {
+  /**
+   * Seats the committee and fixes the rules it votes under: the weighting and
+   * threshold in force now, and each member's stake as of now. A stake change
+   * during the round does not change the weight of a vote already expected.
+   */
+  async assignValidators(
+    id: string,
+    validators: string[],
+    stakes: Record<string, string> = {},
+  ): Promise<VerificationJob> {
     const job = await this.findOne(id);
     job.assignedValidators = validators;
     job.status = JobStatus.ASSIGNED;
+    job.committeeWeights = Object.fromEntries(
+      validators.filter((validatorId) => stakes[validatorId] !== undefined).map((validatorId) => [
+        validatorId,
+        stakes[validatorId],
+      ]),
+    );
+    job.quorumWeighting = this.configService.get<QuorumWeighting>(
+      'quorum.weighting',
+      QuorumWeighting.STAKE,
+    );
+    job.quorumThresholdBps =
+      job.quorumThresholdBps ?? this.configService.get<number>('quorum.thresholdBps', DEFAULT_THRESHOLD_BPS);
     if (job.verdictMode === VerdictMode.COMMIT_REVEAL) {
       // The clock starts when the committee is known, not when the job was
       // submitted: a job that waited for assignment keeps its full window.

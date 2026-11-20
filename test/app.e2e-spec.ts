@@ -121,7 +121,12 @@ describe('Verification Network (e2e)', () => {
       const after = await request(app.getHttpServer()).get('/validators/set').expect(200);
       expect(after.body.epoch).toBeGreaterThanOrEqual(before.body.epoch);
       expect(after.body.validators).toHaveLength(before.body.validators.length + 1);
-      expect(after.body.validators).toContainEqual({ id: registered.body.id, tier: 'gold', weight: 4 });
+      expect(after.body.validators).toContainEqual({
+        id: registered.body.id,
+        tier: 'gold',
+        weight: 4,
+        stake: (20n * ETHER).toString(),
+      });
       expect(after.body.totalWeight).toBe(before.body.totalWeight + 4);
 
       // Unchanged set: the snapshot is reused, not rebuilt.

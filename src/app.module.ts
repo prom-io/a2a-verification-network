@@ -14,6 +14,7 @@ import blockchainConfig from './config/blockchain.config';
 import securityConfig from './config/security.config';
 import deploymentsConfig from './config/deployments.config';
 import reputationConfig from './config/reputation.config';
+import quorumConfig from './config/quorum.config';
 import { BlockchainModule } from './common/blockchain/blockchain.module';
 import { HealthModule } from './modules/health/health.module';
 import { ValidatorsModule } from './modules/validators/validators.module';
@@ -31,7 +32,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [blockchainConfig, securityConfig, deploymentsConfig, reputationConfig],
+      load: [blockchainConfig, securityConfig, deploymentsConfig, reputationConfig, quorumConfig],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

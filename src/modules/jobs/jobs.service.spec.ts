@@ -97,6 +97,33 @@ describe('JobsService', () => {
     expect(reveal - commit).toBe(300_000);
   });
 
+  it('fixes the quorum rules and the committee stakes at assignment', async () => {
+    const { service } = build({ 'quorum.weighting': 'stake', 'quorum.thresholdBps': '6667' });
+    const job = await service.submit({ ...dto, verdictMode: VerdictMode.COMMIT_REVEAL });
+
+    const assigned = await service.assignValidators(job.id, ['v1', 'v2', 'self-validator'], {
+      v1: '1000',
+      v2: '2000',
+      unrelated: '5',
+    });
+
+    expect(assigned.committeeWeights).toEqual({ v1: '1000', v2: '2000' });
+    expect(assigned.quorumWeighting).toBe('stake');
+    expect(Number(assigned.quorumThresholdBps)).toBe(6667);
+  });
+
+  it('keeps a threshold the submitter asked for', async () => {
+    const { service } = build({ 'quorum.thresholdBps': '5001' });
+    const job = await service.submit({ ...dto, quorumThresholdBps: 9000 });
+    expect(job.quorumThresholdBps).toBe(9000);
+
+    const assigned = await service.assignValidators(job.id, ['v1']);
+
+    expect(assigned.quorumThresholdBps).toBe(9000);
+    expect(assigned.quorumWeighting).toBe('stake');
+    expect(assigned.committeeWeights).toEqual({});
+  });
+
   it('takes the phase lengths from the configuration', async () => {
     const { service } = build({ COMMIT_PHASE_SECONDS: '60', REVEAL_PHASE_SECONDS: '30' });
     const job = await service.submit({ ...dto, verdictMode: VerdictMode.COMMIT_REVEAL });

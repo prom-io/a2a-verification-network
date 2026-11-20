@@ -6,6 +6,8 @@ export interface EligibleValidator {
   id: string;
   tier: StakingTier;
   weight: number;
+  /** Stake in wei, when known; weighs the validator's vote in stake-weighted quorums. */
+  stake?: string;
 }
 
 export interface ValidatorSetSnapshot {

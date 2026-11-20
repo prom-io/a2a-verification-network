@@ -97,8 +97,8 @@ describe('ValidatorsService staking tiers', () => {
     const service = new ValidatorsService(repo, configStub(), setCache());
 
     expect(await service.findEligible()).toEqual([
-      { id: 'bronze', tier: StakingTier.BRONZE, weight: 1 },
-      { id: 'platinum', tier: StakingTier.PLATINUM, weight: 8 },
+      { id: 'bronze', tier: StakingTier.BRONZE, weight: 1, stake: ETHER.toString() },
+      { id: 'platinum', tier: StakingTier.PLATINUM, weight: 8, stake: (500n * ETHER).toString() },
     ]);
   });
 

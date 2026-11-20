@@ -125,7 +125,12 @@ export class ValidatorsService {
     return active
       .map((validator) => {
         const definition = this.tierOf(validator.stake);
-        return { id: validator.id, tier: definition.tier, weight: definition.weight };
+        return {
+          id: validator.id,
+          tier: definition.tier,
+          weight: definition.weight,
+          stake: parseStake(validator.stake).toString(),
+        };
       })
       .filter((candidate) => candidate.weight > 0);
   }

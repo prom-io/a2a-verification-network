@@ -107,7 +107,15 @@ export class CoordinatorService {
       selected.push(SELF_VALIDATOR);
     }
 
-    await this.jobsService.assignValidators(jobId, selected);
+    // Recorded with the committee so a stake-weighted vote is weighed with the
+    // stakes the members were drawn with.
+    const stakes: Record<string, string> = {};
+    for (const candidate of eligible) {
+      if (candidate.stake !== undefined && selected.includes(candidate.id)) {
+        stakes[candidate.id] = candidate.stake;
+      }
+    }
+    await this.jobsService.assignValidators(jobId, selected, stakes);
     return selected;
   }
 

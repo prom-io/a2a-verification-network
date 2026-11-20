@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   Index,
 } from 'typeorm';
+import { QuorumWeighting } from '../../commit-reveal/weighted-quorum';
 
 export enum JobStatus {
   PENDING = 'pending',
@@ -74,4 +75,22 @@ export class VerificationJob {
   /** Reveals close after it and the round can be finalized. */
   @Column({ type: 'timestamp', nullable: true })
   revealDeadline!: Date | null;
+
+  /**
+   * How committee votes are weighed; fixed when the committee is assigned.
+   * Jobs from before stake-weighted voting keep one vote per validator.
+   */
+  @Column({ type: 'varchar', length: 8, default: QuorumWeighting.EQUAL })
+  quorumWeighting!: QuorumWeighting;
+
+  /**
+   * Share of the committee's weight, in basis points, one outcome needs.
+   * Set by the submitter or, at assignment, from QUORUM_THRESHOLD_BPS.
+   */
+  @Column({ type: 'int', nullable: true })
+  quorumThresholdBps!: number | null;
+
+  /** Stake in wei of every committee member at the time of assignment. */
+  @Column({ type: 'jsonb', default: {} })
+  committeeWeights!: Record<string, string>;
 }

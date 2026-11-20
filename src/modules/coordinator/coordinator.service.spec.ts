@@ -8,7 +8,7 @@ import { JobStatus, VerdictMode } from '../jobs/entities/verification-job.entity
 import { StakingTier, selectWeighted } from '../validators/staking-tiers';
 
 function build(
-  eligible: Array<{ id: string; tier: StakingTier; weight: number }>,
+  eligible: Array<{ id: string; tier: StakingTier; weight: number; stake?: string }>,
   verdictMode = VerdictMode.INSTANT,
 ) {
   const job = {
@@ -56,7 +56,20 @@ describe('CoordinatorService committee assignment', () => {
 
     expect(selected).toHaveLength(DEFAULT_COMMITTEE_SIZE);
     expect(new Set(selected).size).toBe(DEFAULT_COMMITTEE_SIZE);
-    expect(jobs.assignValidators).toHaveBeenCalledWith('job-1', selected);
+    expect(jobs.assignValidators).toHaveBeenCalledWith('job-1', selected, {});
+  });
+
+  it('records the stakes of the drawn validators with the committee', async () => {
+    const staked = pool.map((candidate, i) => ({ ...candidate, stake: `${(i + 1) * 1000}` }));
+    const { service, jobs } = build(staked);
+
+    const selected = await service.assignValidators('job-1', 5);
+
+    expect(jobs.assignValidators).toHaveBeenCalledWith(
+      'job-1',
+      selected,
+      Object.fromEntries(staked.map((candidate) => [candidate.id, candidate.stake])),
+    );
   });
 
   it('seeds the draw with the job id so it can be recomputed', async () => {
@@ -91,7 +104,7 @@ describe('CoordinatorService committee assignment', () => {
     const { service, jobs } = build([]);
 
     expect(await service.assignValidators('job-1')).toEqual(['self-validator']);
-    expect(jobs.assignValidators).toHaveBeenCalledWith('job-1', ['self-validator']);
+    expect(jobs.assignValidators).toHaveBeenCalledWith('job-1', ['self-validator'], {});
   });
 
   it('publishes the verdict with the assigned committee and completes the job', async () => {

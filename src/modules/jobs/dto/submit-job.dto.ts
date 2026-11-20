@@ -2,13 +2,16 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsString,
   IsNotEmpty,
   IsOptional,
   IsUUID,
   IsUrl,
   Matches,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { VerdictMode } from '../entities/verification-job.entity';
 
@@ -60,6 +63,19 @@ export class SubmitJobDto {
   @IsString()
   @Matches(/^[0-9]{1,78}$/, { message: 'fee must be a non-negative integer string (wei)' })
   fee?: string;
+
+  @ApiProperty({
+    required: false,
+    minimum: 5001,
+    maximum: 10000,
+    description:
+      'Share of the committee weight (basis points) one outcome needs; defaults to QUORUM_THRESHOLD_BPS',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(5001, { message: 'quorumThresholdBps must be above 5000 (a strict majority)' })
+  @Max(10000, { message: 'quorumThresholdBps cannot exceed 10000' })
+  quorumThresholdBps?: number;
 
   @ApiProperty({
     required: false,

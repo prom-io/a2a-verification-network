@@ -23,6 +23,14 @@ import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitVerdictDto } from './dto/commit-verdict.dto';
 import { RevealVerdictDto } from './dto/reveal-verdict.dto';
 import { Tally, computeCommitHash, recoverCommitSigner, tallyReveals } from './commitment';
+import {
+  DEFAULT_THRESHOLD_BPS,
+  QuorumRules,
+  QuorumWeighting,
+  WeightedTally,
+  requiredWeight,
+  tallyWeighted,
+} from './weighted-quorum';
 
 export type CommitRevealPhase = 'commit' | 'reveal' | 'finalized';
 
@@ -42,8 +50,15 @@ export interface RoundStatus {
   commitDeadline: Date | null;
   revealDeadline: Date | null;
   commitments: CommitmentView[];
-  tally: Tally;
+  tally: RoundTally;
 }
+
+/**
+ * Vote counts per outcome, with the decision taken by the weighted tally:
+ * `outcome` and `supporters` come from `weighted`, `quorum` is the number of
+ * votes the threshold amounts to when every vote weighs the same.
+ */
+export type RoundTally = Tally & { weighted: WeightedTally };
 
 /**
  * Two-phase voting for a job's committee.
@@ -208,11 +223,29 @@ export class CommitRevealService {
     return everyoneCommitted || deadlinePassed ? 'reveal' : 'commit';
   }
 
-  private tally(job: VerificationJob, commitments: VerdictCommitment[]): Tally {
+  private tally(job: VerificationJob, commitments: VerdictCommitment[]): RoundTally {
     const votes = commitments
       .filter((c) => c.revealedAt && c.outcome)
       .map((c) => ({ validatorId: c.validatorId, outcome: c.outcome as VerdictOutcome }));
-    return tallyReveals(votes, job.assignedValidators.length);
+    const rules = this.rulesOf(job);
+    const counted = tallyReveals(votes, job.assignedValidators.length);
+    const weighted = tallyWeighted(votes, job.assignedValidators, rules);
+    return {
+      ...counted,
+      outcome: weighted.outcome,
+      supporters: weighted.supporters,
+      quorum: Number(requiredWeight(BigInt(job.assignedValidators.length), rules.thresholdBps)),
+      weighted,
+    };
+  }
+
+  /** The rules fixed on the job at assignment; older jobs vote one-per-validator. */
+  private rulesOf(job: VerificationJob): QuorumRules {
+    return {
+      weighting: job.quorumWeighting ?? QuorumWeighting.EQUAL,
+      thresholdBps: job.quorumThresholdBps ?? DEFAULT_THRESHOLD_BPS,
+      weights: job.committeeWeights ?? {},
+    };
   }
 
   private async settle(job: VerificationJob, commitments: VerdictCommitment[]): Promise<void> {
@@ -223,8 +256,9 @@ export class CommitRevealService {
         this.webhooksService.notifyJobFailed(job, 'the committee did not reach a quorum'),
       );
       this.logger.warn(
-        `Job ${job.id} failed: no outcome reached the quorum of ${tally.quorum} ` +
-          `(${JSON.stringify(tally.counts)})`,
+        `Job ${job.id} failed: no outcome reached ${tally.weighted.requiredWeight} of ` +
+          `${tally.weighted.totalWeight} (${tally.weighted.weighting} weighting, ` +
+          `${JSON.stringify(tally.weighted.weights)})`,
       );
       return;
     }
