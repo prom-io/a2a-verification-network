@@ -39,7 +39,7 @@ function build(env: Record<string, string> = {}) {
     repo as unknown as Repository<VerificationJob>,
     config as unknown as ConfigService,
   );
-  return { service, rows };
+  return { service, rows, repo };
 }
 
 const dto = {
@@ -122,6 +122,40 @@ describe('JobsService', () => {
     expect(assigned.quorumThresholdBps).toBe(9000);
     expect(assigned.quorumWeighting).toBe('stake');
     expect(assigned.committeeWeights).toEqual({});
+  });
+
+  it('widens a committee and opens a fresh window from the given time', async () => {
+    const { service } = build();
+    const job = await service.submit({ ...dto, verdictMode: VerdictMode.COMMIT_REVEAL });
+    await service.assignValidators(job.id, ['v1', 'v2'], { v1: '10', v2: '20' });
+    const now = new Date('2026-05-01T12:00:00.000Z');
+
+    const expanded = await service.expandCommittee(job.id, ['v3', 'v1', 'v4'], { v3: '30', v1: '99' }, now);
+
+    expect(expanded).toMatchObject({
+      assignedValidators: ['v1', 'v2', 'v3', 'v4'],
+      committeeWeights: { v1: '10', v2: '20', v3: '30' },
+      expandedFrom: 2,
+      quorumExpansions: 1,
+      status: JobStatus.IN_PROGRESS,
+      commitDeadline: new Date('2026-05-01T12:05:00.000Z'),
+      revealDeadline: new Date('2026-05-01T12:10:00.000Z'),
+    });
+  });
+
+  it('looks for open commit-reveal rounds past their reveal deadline', async () => {
+    const { service, repo } = build();
+    const now = new Date('2026-05-01T12:00:00.000Z');
+
+    await service.findExpiredRounds(now, 25);
+
+    expect(repo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ verdictMode: VerdictMode.COMMIT_REVEAL }),
+        order: { revealDeadline: 'ASC' },
+        take: 25,
+      }),
+    );
   });
 
   it('takes the phase lengths from the configuration', async () => {

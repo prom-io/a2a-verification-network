@@ -10,6 +10,22 @@ import {
 export interface QuorumConfig {
   weighting: QuorumWeighting;
   thresholdBps: number;
+  /** How often a round without a quorum may be widened before the job fails. */
+  maxExpansions: number;
+  /** Validators added per expansion; 0 adds as many as the committee has. */
+  expansionSize: number;
+  /** Interval of the sweep that closes rounds past their deadline; 0 = off. */
+  timeoutSweepMs: number;
+}
+
+function nonNegativeInteger(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${key} must be a non-negative integer, got ${raw}`);
+  }
+  return value;
 }
 
 /**
@@ -33,7 +49,13 @@ export function parseQuorumConfig(env: NodeJS.ProcessEnv = process.env): QuorumC
       `QUORUM_THRESHOLD_BPS must be an integer from ${MIN_THRESHOLD_BPS} to ${MAX_THRESHOLD_BPS}, got ${raw}`,
     );
   }
-  return { weighting, thresholdBps };
+  return {
+    weighting,
+    thresholdBps,
+    maxExpansions: nonNegativeInteger(env, 'QUORUM_MAX_EXPANSIONS', 1),
+    expansionSize: nonNegativeInteger(env, 'QUORUM_EXPANSION_SIZE', 0),
+    timeoutSweepMs: nonNegativeInteger(env, 'QUORUM_TIMEOUT_SWEEP_MS', 0),
+  };
 }
 
 export default registerAs('quorum', (): QuorumConfig => parseQuorumConfig());

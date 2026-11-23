@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JobsService } from '../jobs/jobs.service';
@@ -19,6 +20,7 @@ import { VerdictsService } from '../verdicts/verdicts.service';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
 import { ReputationService } from '../reputation/reputation.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { selectWeighted } from '../validators/staking-tiers';
 import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitVerdictDto } from './dto/commit-verdict.dto';
 import { RevealVerdictDto } from './dto/reveal-verdict.dto';
@@ -49,6 +51,8 @@ export interface RoundStatus {
   committee: string[];
   commitDeadline: Date | null;
   revealDeadline: Date | null;
+  /** How often the committee was widened after a round without a quorum. */
+  expansions: number;
   commitments: CommitmentView[];
   tally: RoundTally;
 }
@@ -80,6 +84,7 @@ export class CommitRevealService {
     private readonly verdictsService: VerdictsService,
     private readonly reputationService: ReputationService,
     private readonly webhooksService: WebhooksService,
+    private readonly configService: ConfigService,
   ) {}
 
   async commit(jobId: string, dto: CommitVerdictDto, now = new Date()): Promise<CommitmentView> {
@@ -93,6 +98,11 @@ export class CommitRevealService {
     }
     if (commitments.some((c) => c.validatorId === dto.validatorId)) {
       throw new ConflictException(`Validator ${dto.validatorId} has already committed for job ${jobId}`);
+    }
+    if (this.frozenMembers(job).includes(dto.validatorId)) {
+      throw new ForbiddenException(
+        `Validator ${dto.validatorId} missed the commit phase before the committee of job ${jobId} was expanded`,
+      );
     }
 
     // The signature ties the commitment to the validator's registered key, so
@@ -157,7 +167,7 @@ export class CommitRevealService {
     this.logger.log(`Validator ${dto.validatorId} revealed ${dto.outcome} for job ${jobId}`);
 
     if (commitments.every((c) => c.revealedAt)) {
-      await this.settle(job, commitments);
+      await this.settle(job, commitments, now);
     }
     return this.status(jobId, now);
   }
@@ -179,22 +189,27 @@ export class CommitRevealService {
       if (!allRevealed && !deadlinePassed) {
         throw new ConflictException(`Reveal phase is still open for job ${jobId}`);
       }
-      await this.settle(job, commitments);
+      await this.settle(job, commitments, now);
     }
     return this.status(jobId, now);
   }
 
   async status(jobId: string, now = new Date()): Promise<RoundStatus> {
     const { job, commitments } = await this.loadRound(jobId);
+    const phase = this.phaseOf(job, commitments, now);
+    // While a widened committee is committing, the votes revealed in the round
+    // that timed out stay hidden; otherwise the new members could copy them.
+    const sealed = phase === 'commit';
     return {
       jobId,
-      phase: this.phaseOf(job, commitments, now),
+      phase,
       jobStatus: job.status,
       committee: job.assignedValidators,
       commitDeadline: job.commitDeadline,
       revealDeadline: job.revealDeadline,
-      commitments: commitments.map((c) => this.view(c)),
-      tally: this.tally(job, commitments),
+      expansions: job.quorumExpansions ?? 0,
+      commitments: commitments.map((c) => this.view(c, sealed)),
+      tally: this.tally(job, sealed ? [] : commitments),
     };
   }
 
@@ -218,7 +233,11 @@ export class CommitRevealService {
     now: Date,
   ): CommitRevealPhase {
     if (job.status === JobStatus.COMPLETED || job.status === JobStatus.FAILED) return 'finalized';
-    const everyoneCommitted = commitments.length >= job.assignedValidators.length;
+    const committed = new Set(commitments.map((c) => c.validatorId));
+    const frozen = new Set(this.frozenMembers(job));
+    const everyoneCommitted = job.assignedValidators.every(
+      (validatorId) => committed.has(validatorId) || frozen.has(validatorId),
+    );
     const deadlinePassed = !!job.commitDeadline && now > job.commitDeadline;
     return everyoneCommitted || deadlinePassed ? 'reveal' : 'commit';
   }
@@ -248,8 +267,60 @@ export class CommitRevealService {
     };
   }
 
-  private async settle(job: VerificationJob, commitments: VerdictCommitment[]): Promise<void> {
+  /** Members seated before the last expansion that never committed. */
+  private frozenMembers(job: VerificationJob): string[] {
+    if (!job.expandedFrom) return [];
+    return job.assignedValidators.slice(0, job.expandedFrom);
+  }
+
+  /**
+   * Fallback for a round that ended without a quorum: draws more validators
+   * from outside the committee and opens a new commit-reveal window, keeping
+   * the votes already revealed. Returns false when the round cannot be
+   * widened (expansions used up, nobody left to draw), and the job fails.
+   */
+  private async expandCommittee(
+    job: VerificationJob,
+    tally: RoundTally,
+    now: Date,
+  ): Promise<boolean> {
+    const maxExpansions = Number(this.configService.get('quorum.maxExpansions', 1));
+    const expansions = job.quorumExpansions ?? 0;
+    if (expansions >= maxExpansions) return false;
+
+    const size =
+      Number(this.configService.get('quorum.expansionSize', 0)) || job.assignedValidators.length;
+    const outside = (await this.validatorsService.findEligible()).filter(
+      (candidate) => !job.assignedValidators.includes(candidate.id),
+    );
+    // Seeded per job and expansion, like the original draw, so it can be
+    // recomputed by anyone holding the validator set.
+    const added = selectWeighted(outside, size, `${job.id}:expansion:${expansions + 1}`);
+    if (added.length === 0) return false;
+
+    const stakes: Record<string, string> = {};
+    for (const candidate of outside) {
+      if (candidate.stake !== undefined && added.includes(candidate.id)) {
+        stakes[candidate.id] = candidate.stake;
+      }
+    }
+    const expanded = await this.jobsService.expandCommittee(job.id, added, stakes, now);
+    this.logger.warn(
+      `Job ${job.id}: no quorum (${tally.weighted.weights[VerdictOutcome.ACCEPT]}/` +
+        `${tally.weighted.weights[VerdictOutcome.REJECT]}/${tally.weighted.weights[VerdictOutcome.PARTIAL]} ` +
+        `of ${tally.weighted.requiredWeight} needed); committee widened by ${added.length} to ` +
+        `${expanded.assignedValidators.length}, expansion ${expanded.quorumExpansions} of ${maxExpansions}`,
+    );
+    return true;
+  }
+
+  private async settle(
+    job: VerificationJob,
+    commitments: VerdictCommitment[],
+    now: Date,
+  ): Promise<void> {
     const tally = this.tally(job, commitments);
+    if (!tally.outcome && (await this.expandCommittee(job, tally, now))) return;
     if (!tally.outcome) {
       await this.jobsService.updateStatus(job.id, JobStatus.FAILED);
       await this.notify(job.id, () =>
@@ -296,13 +367,16 @@ export class CommitRevealService {
     }
   }
 
-  /** Never exposes the salt; the outcome is empty until the reveal. */
-  private view(commitment: VerdictCommitment): CommitmentView {
+  /**
+   * Never exposes the salt; the outcome is empty until the reveal, and while
+   * the round is sealed (a widened committee is committing).
+   */
+  private view(commitment: VerdictCommitment, sealed = false): CommitmentView {
     return {
       validatorId: commitment.validatorId,
       committedAt: commitment.committedAt,
       revealed: !!commitment.revealedAt,
-      outcome: commitment.outcome,
+      outcome: sealed ? null : commitment.outcome,
       revealedAt: commitment.revealedAt,
     };
   }

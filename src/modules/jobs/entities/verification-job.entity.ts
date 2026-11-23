@@ -93,4 +93,16 @@ export class VerificationJob {
   /** Stake in wei of every committee member at the time of assignment. */
   @Column({ type: 'jsonb', default: {} })
   committeeWeights!: Record<string, string>;
+
+  /** How often the committee was widened because the round had no quorum. */
+  @Column({ type: 'int', default: 0 })
+  quorumExpansions!: number;
+
+  /**
+   * Committee size before the last expansion. Members before this index that
+   * had not committed by then cannot commit any more: they could have seen
+   * the votes revealed in the round that timed out.
+   */
+  @Column({ type: 'int', nullable: true })
+  expandedFrom!: number | null;
 }

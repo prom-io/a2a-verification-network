@@ -8,6 +8,8 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitRevealController } from './commit-reveal.controller';
 import { CommitRevealService } from './commit-reveal.service';
+import { QuorumTimeoutService } from './quorum-timeout.service';
+import { RoundsController } from './rounds.controller';
 
 @Module({
   imports: [
@@ -18,8 +20,8 @@ import { CommitRevealService } from './commit-reveal.service';
     ReputationModule,
     WebhooksModule,
   ],
-  controllers: [CommitRevealController],
-  providers: [CommitRevealService],
+  controllers: [CommitRevealController, RoundsController],
+  providers: [CommitRevealService, QuorumTimeoutService],
   exports: [CommitRevealService],
 })
 export class CommitRevealModule {}

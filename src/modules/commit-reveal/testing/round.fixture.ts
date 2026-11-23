@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 import { Repository } from 'typeorm';
 import { JobsService } from '../../jobs/jobs.service';
@@ -37,7 +38,11 @@ export function saltFor(label: string): string {
  * validators, and stubs standing in for the job, validator and verdict
  * services. Only the commitment logic under test is real.
  */
-export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob> = {}) {
+export function buildRound(
+  committeeSize = 3,
+  overrides: Partial<VerificationJob> = {},
+  settings: Record<string, unknown> = {},
+) {
   const validators: TestValidator[] = Array.from({ length: committeeSize }, (_, i) => ({
     id: `00000000-0000-4000-8000-00000000000${i + 1}`,
     wallet: ethers.Wallet.createRandom(),
@@ -79,14 +84,44 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
       job.status = status;
       return job;
     }),
+    expandCommittee: jest.fn(
+      async (_id: string, added: string[], stakes: Record<string, string>, now: Date) => {
+        job.expandedFrom = job.assignedValidators.length;
+        job.assignedValidators = [...job.assignedValidators, ...added];
+        job.committeeWeights = { ...(job.committeeWeights ?? {}), ...stakes };
+        job.quorumExpansions = (job.quorumExpansions ?? 0) + 1;
+        job.commitDeadline = new Date(now.getTime() + 300_000);
+        job.revealDeadline = new Date(now.getTime() + 600_000);
+        job.status = JobStatus.IN_PROGRESS;
+        return job;
+      },
+    ),
+  };
+
+  /** Staked validators outside the committee, available to an expansion. */
+  const reserve: TestValidator[] = [];
+  const addReserve = (count: number) => {
+    for (let i = 0; i < count; i++) {
+      reserve.push({
+        id: `00000000-0000-4000-9000-00000000000${reserve.length + 1}`,
+        wallet: ethers.Wallet.createRandom(),
+      });
+    }
+    return reserve.slice(-count);
   };
 
   const validatorsService = {
     findOne: jest.fn(async (id: string) => {
-      const validator = validators.find((v) => v.id === id);
+      const validator = [...validators, ...reserve].find((v) => v.id === id);
       if (!validator) throw new NotFoundException(`Validator ${id} not found`);
       return { id, address: validator.wallet.address };
     }),
+    findEligible: jest.fn(async () =>
+      [...validators, ...reserve].map((v) => ({ id: v.id, tier: 'bronze', weight: 1, stake: '1000' })),
+    ),
+  };
+  const config = {
+    get: jest.fn((key: string, fallback?: unknown) => settings[key] ?? fallback),
   };
 
   const verdicts = {
@@ -109,6 +144,7 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
     verdicts as unknown as VerdictsService,
     reputation as unknown as ReputationService,
     webhooks as unknown as WebhooksService,
+    config as unknown as ConfigService,
   );
 
   /** Builds the commit payload a validator node would send. */
@@ -141,6 +177,9 @@ export function buildRound(committeeSize = 3, overrides: Partial<VerificationJob
     verdicts,
     reputation,
     webhooks,
+    validatorsService,
+    reserve,
+    addReserve,
     commitPayload,
     commit,
     reveal,

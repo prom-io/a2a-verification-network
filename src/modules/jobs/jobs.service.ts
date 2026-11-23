@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, LessThan, Repository } from 'typeorm';
 import { VerificationJob, JobStatus, VerdictMode } from './entities/verification-job.entity';
 import { SubmitJobDto } from './dto/submit-job.dto';
 import { PriorityOptions } from './priority';
@@ -101,6 +101,48 @@ export class JobsService {
       job.revealDeadline = new Date(now + commitMs + revealMs);
     }
     return this.jobRepo.save(job);
+  }
+
+  /**
+   * Widens the committee of a round that ended without a quorum: the new
+   * members join with their stakes, and a fresh commit and reveal window opens
+   * from `now`. Members seated before the expansion that never committed are
+   * frozen out (see expandedFrom).
+   */
+  async expandCommittee(
+    id: string,
+    added: string[],
+    stakes: Record<string, string>,
+    now = new Date(),
+  ): Promise<VerificationJob> {
+    const job = await this.findOne(id);
+    const fresh = added.filter((validatorId) => !job.assignedValidators.includes(validatorId));
+    job.expandedFrom = job.assignedValidators.length;
+    job.assignedValidators = [...job.assignedValidators, ...fresh];
+    job.committeeWeights = { ...(job.committeeWeights ?? {}) };
+    for (const validatorId of fresh) {
+      if (stakes[validatorId] !== undefined) job.committeeWeights[validatorId] = stakes[validatorId];
+    }
+    job.quorumExpansions = (job.quorumExpansions ?? 0) + 1;
+    const commitMs = Number(this.configService.get('COMMIT_PHASE_SECONDS', 300)) * 1000;
+    const revealMs = Number(this.configService.get('REVEAL_PHASE_SECONDS', 300)) * 1000;
+    job.commitDeadline = new Date(now.getTime() + commitMs);
+    job.revealDeadline = new Date(now.getTime() + commitMs + revealMs);
+    job.status = JobStatus.IN_PROGRESS;
+    return this.jobRepo.save(job);
+  }
+
+  /** Commit-reveal rounds still open after their reveal deadline, oldest first. */
+  async findExpiredRounds(now: Date, limit: number): Promise<VerificationJob[]> {
+    return this.jobRepo.find({
+      where: {
+        verdictMode: VerdictMode.COMMIT_REVEAL,
+        status: In([JobStatus.ASSIGNED, JobStatus.IN_PROGRESS]),
+        revealDeadline: LessThan(now),
+      },
+      order: { revealDeadline: 'ASC' },
+      take: limit,
+    });
   }
 
   /**
