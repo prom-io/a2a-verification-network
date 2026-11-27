@@ -1,6 +1,6 @@
 import { CoordinatorService, DEFAULT_COMMITTEE_SIZE } from './coordinator.service';
 import { JobsService } from '../jobs/jobs.service';
-import { ValidatorsService } from '../validators/validators.service';
+import { EligibilityService } from '../eligibility/eligibility.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { ReputationService } from '../reputation/reputation.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
@@ -16,6 +16,7 @@ function build(
     sessionId: 'session-1',
     requestHash: '0xrequest',
     resultHash: '',
+    policyId: 'policy-1',
     status: JobStatus.PENDING,
     verdictMode,
   };
@@ -25,19 +26,29 @@ function build(
     assignValidators: jest.fn().mockResolvedValue(job),
   };
   const validators = { findEligible: jest.fn().mockResolvedValue(eligible) };
+  const eligibility = {
+    candidatesFor: jest.fn(async () => ({
+      minScore: 0,
+      excluded: 0,
+      candidates: await validators.findEligible(),
+    })),
+  };
   const verdicts = {
     createAndPublish: jest.fn().mockResolvedValue({ id: 'verdict-1', txHash: undefined }),
   };
   const reputation = { recordForValidators: jest.fn().mockResolvedValue(undefined) };
-  const webhooks = { notifyVerdict: jest.fn().mockResolvedValue(null) };
+  const webhooks = {
+    notifyVerdict: jest.fn().mockResolvedValue(null),
+    notifyJobFailed: jest.fn().mockResolvedValue(null),
+  };
   const service = new CoordinatorService(
     jobs as unknown as JobsService,
-    validators as unknown as ValidatorsService,
+    eligibility as unknown as EligibilityService,
     verdicts as unknown as VerdictsService,
     reputation as unknown as ReputationService,
     webhooks as unknown as WebhooksService,
   );
-  return { service, jobs, validators, verdicts, reputation, webhooks };
+  return { service, jobs, validators, eligibility, verdicts, reputation, webhooks };
 }
 
 const pool = [
@@ -105,6 +116,34 @@ describe('CoordinatorService committee assignment', () => {
 
     expect(await service.assignValidators('job-1')).toEqual(['self-validator']);
     expect(jobs.assignValidators).toHaveBeenCalledWith('job-1', ['self-validator'], {});
+  });
+
+  it('draws only from the validators the policy admits', async () => {
+    const { service, eligibility } = build(pool);
+    const admitted = pool.filter((candidate) => candidate.tier !== 'platinum');
+    eligibility.candidatesFor.mockResolvedValue({ minScore: 0.8, excluded: 1, candidates: admitted });
+
+    const selected = await service.assignValidators('job-1', 5);
+
+    expect(eligibility.candidatesFor).toHaveBeenCalledWith('policy-1');
+    expect(selected).not.toContain('platinum-1');
+    expect(selected).toHaveLength(4);
+  });
+
+  it('fails the job instead of issuing a verdict when nobody meets the reputation minimum', async () => {
+    const { service, eligibility, jobs, verdicts, webhooks } = build(pool);
+    eligibility.candidatesFor.mockResolvedValue({ minScore: 0.9, excluded: 5, candidates: [] });
+
+    const result = await service.processJob('job-1');
+
+    expect(result).toMatchObject({ outcome: 'failed', verdictId: null });
+    expect(jobs.assignValidators).not.toHaveBeenCalled();
+    expect(jobs.updateStatus).toHaveBeenCalledWith('job-1', JobStatus.FAILED);
+    expect(verdicts.createAndPublish).not.toHaveBeenCalled();
+    expect(webhooks.notifyJobFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
+      'no staked validator meets the reputation minimum of the policy',
+    );
   });
 
   it('publishes the verdict with the assigned committee and completes the job', async () => {

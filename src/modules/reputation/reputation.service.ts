@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { EntityType, ReputationScore } from './entities/reputation-score.entity';
 import {
   compositeScore,
@@ -48,6 +48,18 @@ export class ReputationService {
         `Reputation for entity ${entityId} not found`,
       );
     return this.view(score, now);
+  }
+
+  /**
+   * Effective scores of many entities in one read, keyed by entity id.
+   * Entities without a record are left out; callers decide what an unrated
+   * entity is worth.
+   */
+  async effectiveScores(entityIds: string[], now = new Date()): Promise<Map<string, number>> {
+    const ids = [...new Set(entityIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await this.reputationRepo.findBy({ entityId: In(ids) });
+    return new Map(rows.map((row) => [row.entityId, this.view(row, now).effectiveScore]));
   }
 
   async upsert(data: Partial<ReputationScore>): Promise<ReputationScore> {

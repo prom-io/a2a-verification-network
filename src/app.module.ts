@@ -27,6 +27,7 @@ import { PoliciesModule } from './modules/policies/policies.module';
 import { CommitRevealModule } from './modules/commit-reveal/commit-reveal.module';
 import { SlashingModule } from './modules/slashing/slashing.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { EligibilityModule } from './modules/eligibility/eligibility.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     CommitRevealModule,
     SlashingModule,
     WebhooksModule,
+    EligibilityModule,
   ],
   providers: [
     PinoLoggerService,

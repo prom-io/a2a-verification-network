@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobsService } from '../jobs/jobs.service';
-import { ValidatorsService } from '../validators/validators.service';
+import { EligibilityService } from '../eligibility/eligibility.service';
 import { VerdictsService } from '../verdicts/verdicts.service';
 import { ReputationService } from '../reputation/reputation.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
@@ -20,7 +20,7 @@ export class CoordinatorService {
 
   constructor(
     private readonly jobsService: JobsService,
-    private readonly validatorsService: ValidatorsService,
+    private readonly eligibilityService: EligibilityService,
     private readonly verdictsService: VerdictsService,
     private readonly reputationService: ReputationService,
     private readonly webhooksService: WebhooksService,
@@ -34,9 +34,22 @@ export class CoordinatorService {
     txHash?: string;
   }> {
     const validators = await this.assignValidators(jobId);
-    this.logger.log(`Assigned ${validators.length} validators to job ${jobId}`);
-
     const job = await this.jobsService.findOne(jobId);
+
+    if (validators.length === 0) {
+      // The policy's reputation minimum left nobody to draw. Issuing the
+      // verdict without a committee would bypass the gate, so the job fails.
+      const reason = 'no staked validator meets the reputation minimum of the policy';
+      await this.jobsService.updateStatus(jobId, JobStatus.FAILED);
+      await this.webhooksService
+        .notifyJobFailed(job, reason)
+        .catch((error: Error) =>
+          this.logger.error(`Could not queue the failure webhook for job ${jobId}: ${error.message}`),
+        );
+      this.logger.warn(`Job ${jobId} failed: ${reason}`);
+      return { jobId: job.id, sessionId: job.sessionId, outcome: 'failed', verdictId: null };
+    }
+    this.logger.log(`Assigned ${validators.length} validators to job ${jobId}`);
 
     if (job.verdictMode === VerdictMode.COMMIT_REVEAL) {
       // The verdict comes from the committee's commit-reveal round, so there is
@@ -94,14 +107,28 @@ export class CoordinatorService {
   }
 
   /**
-   * Draws the committee for a job from the staked, active validators. The
-   * draw is weighted by staking tier and seeded with the job id, so it is
-   * reproducible and a validator cannot influence it by registering earlier.
+   * Draws the committee for a job from the staked, active validators that
+   * meet the reputation minimum of the job's policy. The draw is weighted by
+   * staking tier and seeded with the job id, so it is reproducible and a
+   * validator cannot influence it by registering earlier.
+   *
+   * Returns no one when the policy is gated and nobody qualifies; the
+   * placeholder committee is only used when no validator is staked at all
+   * and the policy asks for no reputation.
    */
   async assignValidators(jobId: string, size = DEFAULT_COMMITTEE_SIZE): Promise<string[]> {
-    const eligible = await this.validatorsService.findEligible();
+    const job = await this.jobsService.findOne(jobId);
+    const { candidates: eligible, minScore, excluded } = await this.eligibilityService.candidatesFor(
+      job.policyId,
+    );
     const selected = selectWeighted(eligible, size, jobId);
 
+    if (selected.length === 0 && minScore > 0) {
+      this.logger.warn(
+        `No validator meets reputation ${minScore} for job ${jobId} (${excluded} below the minimum)`,
+      );
+      return [];
+    }
     if (selected.length === 0) {
       this.logger.warn(`No staked active validators available for job ${jobId}, using self as validator`);
       selected.push(SELF_VALIDATOR);

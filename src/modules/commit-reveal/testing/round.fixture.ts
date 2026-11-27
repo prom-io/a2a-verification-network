@@ -13,6 +13,7 @@ import { VerdictsService } from '../../verdicts/verdicts.service';
 import { VerdictOutcome } from '../../verdicts/entities/verdict.entity';
 import { ReputationService } from '../../reputation/reputation.service';
 import { WebhooksService } from '../../webhooks/webhooks.service';
+import { EligibilityService } from '../../eligibility/eligibility.service';
 import { CommitRevealService } from '../commit-reveal.service';
 import { computeCommitHash } from '../commitment';
 import { VerdictCommitment } from '../entities/verdict-commitment.entity';
@@ -123,6 +124,14 @@ export function buildRound(
   const config = {
     get: jest.fn((key: string, fallback?: unknown) => settings[key] ?? fallback),
   };
+  /** Admits every staked validator unless a test narrows it down. */
+  const eligibility = {
+    candidatesFor: jest.fn(async () => ({
+      minScore: 0,
+      excluded: 0,
+      candidates: await validatorsService.findEligible(),
+    })),
+  };
 
   const verdicts = {
     createAndPublish: jest.fn(async (params: { outcome: VerdictOutcome }) => ({
@@ -145,6 +154,7 @@ export function buildRound(
     reputation as unknown as ReputationService,
     webhooks as unknown as WebhooksService,
     config as unknown as ConfigService,
+    eligibility as unknown as EligibilityService,
   );
 
   /** Builds the commit payload a validator node would send. */
@@ -178,6 +188,7 @@ export function buildRound(
     reputation,
     webhooks,
     validatorsService,
+    eligibility,
     reserve,
     addReserve,
     commitPayload,

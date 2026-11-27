@@ -135,6 +135,19 @@ describe('CommitRevealService quorum timeout fallback', () => {
     expect(empty.jobs.expandCommittee).not.toHaveBeenCalled();
   });
 
+  it('draws late joiners only from the validators the policy admits', async () => {
+    const { service, job, eligibility, added } = await timedOutRound(3);
+    eligibility.candidatesFor.mockResolvedValue({
+      minScore: 0.7,
+      excluded: 2,
+      candidates: [{ id: added[1].id, tier: 'bronze', weight: 1, stake: '1000' }] as never,
+    });
+
+    await service.finalize(job.id, TIMED_OUT);
+
+    expect(job.assignedValidators.slice(3)).toEqual([added[1].id]);
+  });
+
   it('also widens a fully revealed round whose votes are split', async () => {
     const round = buildRound(2);
     const [a, b] = round.validators;

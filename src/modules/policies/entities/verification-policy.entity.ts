@@ -54,6 +54,13 @@ export class VerificationPolicy {
   @Column({ type: 'int', default: 1 })
   version!: number;
 
+  /**
+   * Lowest effective reputation (0..1) a validator needs to be drawn for jobs
+   * under this policy; 0 lets every staked validator in.
+   */
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 0 })
+  minReputationScore!: string;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

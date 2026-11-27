@@ -20,6 +20,7 @@ import { VerdictsService } from '../verdicts/verdicts.service';
 import { VerdictOutcome } from '../verdicts/entities/verdict.entity';
 import { ReputationService } from '../reputation/reputation.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { EligibilityService } from '../eligibility/eligibility.service';
 import { selectWeighted } from '../validators/staking-tiers';
 import { VerdictCommitment } from './entities/verdict-commitment.entity';
 import { CommitVerdictDto } from './dto/commit-verdict.dto';
@@ -85,6 +86,7 @@ export class CommitRevealService {
     private readonly reputationService: ReputationService,
     private readonly webhooksService: WebhooksService,
     private readonly configService: ConfigService,
+    private readonly eligibilityService: EligibilityService,
   ) {}
 
   async commit(jobId: string, dto: CommitVerdictDto, now = new Date()): Promise<CommitmentView> {
@@ -290,9 +292,9 @@ export class CommitRevealService {
 
     const size =
       Number(this.configService.get('quorum.expansionSize', 0)) || job.assignedValidators.length;
-    const outside = (await this.validatorsService.findEligible()).filter(
-      (candidate) => !job.assignedValidators.includes(candidate.id),
-    );
+    // The policy's reputation minimum applies to late joiners as well.
+    const { candidates } = await this.eligibilityService.candidatesFor(job.policyId);
+    const outside = candidates.filter((candidate) => !job.assignedValidators.includes(candidate.id));
     // Seeded per job and expansion, like the original draw, so it can be
     // recomputed by anyone holding the validator set.
     const added = selectWeighted(outside, size, `${job.id}:expansion:${expansions + 1}`);

@@ -36,6 +36,9 @@ function build(seed: Partial<ReputationScore>[] = [], config: Record<string, unk
     findOneBy: jest.fn(async ({ entityId }: { entityId: string }) =>
       rows.find((row) => row.entityId === entityId) ?? null,
     ),
+    findBy: jest.fn(async ({ entityId }: { entityId: { value: string[] } }) =>
+      rows.filter((row) => entityId.value.includes(row.entityId)),
+    ),
   };
   const configService = {
     get: jest.fn((key: string, fallback?: unknown) => config[key] ?? fallback),
@@ -46,6 +49,30 @@ function build(seed: Partial<ReputationScore>[] = [], config: Record<string, unk
   );
   return { service, rows, repo };
 }
+
+describe('ReputationService.effectiveScores', () => {
+  it('returns the decayed score of every known entity in one read', async () => {
+    const { service, repo } = build([
+      { entityId: 'fresh', accuracy: '0.9000', lastActivityAt: NOW },
+      { entityId: 'stale', accuracy: '1.0000', lastActivityAt: daysAgo(30) },
+    ]);
+
+    const scores = await service.effectiveScores(['fresh', 'stale', 'unknown', 'fresh'], NOW);
+
+    expect(repo.findBy).toHaveBeenCalledTimes(1);
+    expect([...scores.keys()].sort()).toEqual(['fresh', 'stale']);
+    expect(scores.get('fresh')).toBe(0.95);
+    // One half-life: halfway from 1.0 back to the neutral 0.5.
+    expect(scores.get('stale')).toBe(0.75);
+  });
+
+  it('does not query for an empty list', async () => {
+    const { service, repo } = build();
+
+    expect((await service.effectiveScores([])).size).toBe(0);
+    expect(repo.findBy).not.toHaveBeenCalled();
+  });
+});
 
 describe('ReputationService decay on read', () => {
   it('reports the stored score unchanged for an entity seen just now', async () => {

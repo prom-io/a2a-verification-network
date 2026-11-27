@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { VerificationPolicy } from './entities/verification-policy.entity';
 import { CreatePolicyDto } from './dto/create-policy.dto';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class PoliciesService {
   constructor(
@@ -23,12 +25,19 @@ export class PoliciesService {
       evidenceRequirements: dto.evidenceRequirements ?? {},
       metadataUri: dto.metadataUri ?? null,
       metadataHash: dto.metadataHash ?? null,
+      minReputationScore: (dto.minReputationScore ?? 0).toFixed(4),
     });
     return this.policyRepo.save(policy);
   }
 
   async findAll(): Promise<VerificationPolicy[]> {
     return this.policyRepo.find();
+  }
+
+  /** The policy, or null when there is none (or the id cannot be one). */
+  async findById(id: string): Promise<VerificationPolicy | null> {
+    if (!UUID.test(id)) return null;
+    return this.policyRepo.findOneBy({ id });
   }
 
   async findOne(id: string): Promise<VerificationPolicy> {
